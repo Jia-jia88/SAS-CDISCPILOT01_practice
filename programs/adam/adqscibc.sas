@@ -1,3 +1,17 @@
+/*==========================================================================
+  Program   : adqscibc.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADQSCIBC (CIBIC+ Analysis Dataset, BDS)
+              - Analysis windows from ADY (SAP 8.2, shared with ADAS-Cog)
+              - ANL01FL: record closest to the target day in each window
+              - LOCF records for empty Week 8/16/24 windows (DTYPE = 'LOCF')
+  Input     : ADAM.ADSL_V1, SDTM QS (QSTESTCD = 'CIBIC')
+              Reference ADQSCIBC (adqscibc.xpt) - used for QC comparison
+  Output    : ADAM.ADQSCIBC_V1
+  Spec      : CDISCPILOT01 define.xml (ADQSCIBC); SAP 8.1, 8.2
+  Run after : setup.sas, adsl.sas
+==========================================================================*/
+
 LIBNAME QSSDTM XPORT "&SDTMPATH/qs.xpt";
 LIBNAME ADQSCIBC XPORT "&REFPATH/adqscibc.xpt";
 
@@ -27,14 +41,6 @@ DATA ADSL_STEP_1;
 RUN;
 
 /*STEP 2 Derive QS directly*/
-
-PROC SQL;
-SELECT *
-FROM Dictionary.columns
-WHERE libname = 'WORK'
-AND memname = 'QS_SDTM'
-;
-QUIT;
 
 DATA QS_STEP_2;
 	SET QS_SDTM;
@@ -211,26 +217,25 @@ DATA CIBC_STEP_8_IMPUTE;
     	_VISITNUM = .; _VISIT = ''; _VISITDY = .; _QSSEQ = .;
 	END;
 
-	IF ANL01FL = 'Y' AND NOT MISSING(AVAL) THEN DO;      /* 更新鏈條 */
+	IF ANL01FL = 'Y' AND NOT MISSING(AVAL) THEN DO;      /* update the values to carry forward */
     	val_impute = AVAL;
     	_ADT = ADT; _ADY = ADY;
     	_VISITNUM = VISITNUM; _VISIT = VISIT; _VISITDY = VISITDY; _QSSEQ = QSSEQ;
 	END;
 
-	IF DTYPE = 'LOCF' THEN DO;                           /* 填補 */
+	IF DTYPE = 'LOCF' THEN DO;                           /* fill the LOCF record */
     	AVAL = val_impute;
    	 	ADT = _ADT; ADY = _ADY;
     	VISITNUM = _VISITNUM; VISIT = _VISIT; VISITDY = _VISITDY; QSSEQ = _QSSEQ;
-    	AWTDIFF = ABS(ADY - AWTARGET);                   /* 用來源 ADY、目標 AWTARGET 重算 */
+    	AWTDIFF = ABS(ADY - AWTARGET);                   /* recompute from the source ADY and the target AWTARGET */
 		ANL01FL = 'Y';
 	END;
-	DROP val_impute _ADT _ADY _VISITNUM _VISIT _VISITDY _QSSEQ;
-/* ① 剔除那一行還是沒加，補在 STEP_8_IMPUTE 的最後 */
+	/* drop LOCF records that have no earlier value to carry forward */
     IF NOT (DTYPE = 'LOCF' AND MISSING(AVAL));
     DROP val_impute _ADT _ADY _VISITNUM _VISIT _VISITDY _QSSEQ;
 RUN;
 
-/* ② 補回 ADSL 與參數欄位 */
+/* Re-attach ADSL and parameter variables (LOCF records were created without them) */
 PROC SORT DATA = CIBC_STEP_8_IMPUTE; BY USUBJID; RUN;
 PROC SORT DATA = ADSL_STEP_1;        BY USUBJID; RUN;
 
@@ -242,7 +247,7 @@ DATA CIBC_STEP_8;
     BY USUBJID;
     IF B = 1;
 
-    PARAMCD = 'CIBICVAL';        /* 只有一個參數，直接賦值比 merge 省事 */
+    PARAMCD = 'CIBICVAL';        /* single parameter: assigned directly */
     PARAM   = 'CIBIC Score';
     PARAMN  = 1;
 RUN;
@@ -303,10 +308,10 @@ PROC SORT DATA = ADQSCIBC_FINAL;
     BY USUBJID PARAMCD AVISITN ADY;
 RUN;
 /*=============================================================================================
-							 		QC step
+						QC: compare with the CDISC reference ADQSCIBC
 ===============================================================================================*/
 
-/*STEP 10 Compare*/
+/*STEP 10 Compare with the CDISC reference ADQSCIBC*/
 PROC SORT DATA = ADQSCIBC_FINAL;
 	BY STUDYID USUBJID PARAMCD AVISIT DTYPE;
 RUN;

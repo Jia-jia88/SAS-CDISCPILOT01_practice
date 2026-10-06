@@ -1,3 +1,19 @@
+/*==========================================================================
+  Program   : adlbhy.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADLBHY (Hy's Law Analysis Dataset, BDS)
+              ALT, AST and BILI records from ADLBC plus three derived
+              parameters: BILIHY (bilirubin > 1.5 x ULN), TRANSHY
+              (ALT or AST > 1.5 x ULN) and HYLAW (both conditions).
+  Input     : ADAM.ADSL_V1, ADAM.ADLBC_V1
+              Reference ADLBHY (adlbhy.xpt) - used for QC comparison
+  Output    : ADAM.ADLBHY_V1
+  Spec      : CDISCPILOT01 define.xml (ADLBHY) and SAP
+  Run after : setup.sas, adsl.sas, adlbc.sas
+  Notes     : The variable list (&ADLBHY_NAME) and labels (&LABEL_ADLBHY)
+              are read from the reference dataset - see docs/review_notes.md.
+==========================================================================*/
+
 LIBNAME LBSDTM XPORT "&SDTMPATH/lb.xpt";
 LIBNAME ADLBHY XPORT "&REFPATH/adlbhy.xpt";
 
@@ -87,9 +103,6 @@ DERIVED|Bilirubin 1.5 x ULN|BILIHY|4|HYLAW
 DERIVED|Transaminase 1.5 x ULN|TRANSHY|5|HYLAW
 DERIVED|Total Bili 1.5 x ULN and Transaminase 1.5 x ULN|HYLAW|6|HYLAW
 ;
-RUN;
-
-PROC PRINT DATA = param_lookup;
 RUN;
 
 
@@ -215,7 +228,7 @@ DATA ALT_ABLFL_FINAL;
 	MERGE ALT_FL(IN = A) ADLBC_FOR_MERGE_ABLFL_ALT(IN = B);
 	BY USUBJID AVISITN;
 	IF A = 1;
-	IF B = 0 THEN PUT 'WARNING: ABLFL 未配對成功 ' USUBJID= AVISITN=;
+	IF B = 0 THEN PUT 'WARNING: ABLFL record not matched for ' USUBJID= AVISITN=;
 RUN;
 
 
@@ -248,7 +261,7 @@ DATA AST_ABLFL_FINAL;
 	MERGE AST_FL(IN = A) ADLBC_FOR_MERGE_ABLFL_AST(IN = B);
 	BY USUBJID AVISITN;
 	IF A = 1;
-	IF B = 0 THEN PUT 'WARNING: ABLFL 未配對成功 ' USUBJID= AVISITN=;
+	IF B = 0 THEN PUT 'WARNING: ABLFL record not matched for ' USUBJID= AVISITN=;
 RUN;
 
 
@@ -369,7 +382,7 @@ DATA BILIHY_ABLFL_FINAL;
 	MERGE BILIHY_FL(IN = A) ADLBC_FOR_MERGE_ABLFL_BILI(IN = B);
 	BY USUBJID AVISITN;
 	IF A = 1;
-	IF B = 0 THEN PUT 'WARNING: ABLFL 未配對成功 ' USUBJID= AVISITN=;
+	IF B = 0 THEN PUT 'WARNING: ABLFL record not matched for ' USUBJID= AVISITN=;
 RUN;
 
 /*Filter TRANSHY AVAL = 1 and ABLFL*/
@@ -401,7 +414,7 @@ DATA TRANSHY_ABLFL_FINAL;
 	MERGE TRANSHY_FL(IN = A) ADLBC_FOR_MERGE_ABLFL_TRANSHY(IN = B);
 	BY USUBJID AVISITN;
 	IF A = 1;
-	IF B = 0 THEN PUT 'WARNING: ABLFL 未配對成功 ' USUBJID= AVISITN=;
+	IF B = 0 THEN PUT 'WARNING: ABLFL record not matched for ' USUBJID= AVISITN=;
 RUN;
 
 /*Merge the two datasets*/
@@ -472,7 +485,7 @@ RUN;
 
 /*STEP 11 Merge dataset and param_lookup*/
 
-/*STEP 11a:param_lookup 合併(這段被你刪掉了,要補回來)*/
+/*STEP 11a Merge PARAM_LOOKUP*/
 PROC SORT DATA = PARAM_LOOKUP; BY PARAMCD; RUN;
 PROC SORT DATA = HYLAW_STEP_10; BY PARAMCD; RUN;
 
@@ -482,7 +495,7 @@ DATA HYLAW_STEP_11;
 	IF B = 1;
 RUN;
 
-/*STEP 11b:AVISIT 對照表合併*/
+/*STEP 11b Merge the AVISIT lookup (AVISITN -> AVISIT)*/
 PROC SORT DATA = ADLBC_FOR_HYLAW(KEEP = AVISITN AVISIT) OUT = AVISIT_LOOKUP NODUPKEY;
 	BY AVISITN;
 RUN;
@@ -528,12 +541,9 @@ DATA STEP_13_FINAL;
 	KEEP &ADLBHY_NAME;
 RUN;
 
-PROC CONTENTS DATA = STEP_13_FINAL;
-RUN;
-
-PROC CONTENTS DATA = ADLBHY_STD;
-RUN;
-
+/*=================================================================================================
+						QC: compare with the CDISC reference ADLBHY
+==================================================================================================*/
 PROC SORT DATA = ADLBHY_STD;
 	BY USUBJID PARAMCD AVISITN;
 RUN;
@@ -549,9 +559,9 @@ RUN;
 
 
 
-/*STEP 14 QC*/
-
-
+/*===============================================================================================
+									Save ADLBHY
+================================================================================================*/
 
 DATA ADAM.ADLBHY_V1;
 	SET STEP_13_FINAL;

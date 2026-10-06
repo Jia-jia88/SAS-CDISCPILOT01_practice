@@ -1,3 +1,20 @@
+/*==========================================================================
+  Program   : adlbc.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADLBC (Laboratory Chemistry Analysis Dataset, BDS)
+              Two record types per test: the observed value (PARAMCD = test
+              code) and the change from the previous visit relative to the
+              normal range (PARAMCD = '_' || test code), plus End of Treatment
+              pseudo-records (AVISITN = 99).
+  Input     : ADAM.ADSL_V1, SDTM LB (LBCAT = 'CHEMISTRY')
+              Reference ADLBC (adlbc.xpt) - used for QC comparison
+  Output    : ADAM.ADLBC_V1
+  Spec      : CDISCPILOT01 define.xml (ADLBC) and SAP
+  Run after : setup.sas, adsl.sas
+  Notes     : Variable labels are currently read from the reference dataset
+              (&LABEL_ADLBC) - see docs/review_notes.md.
+==========================================================================*/
+
 LIBNAME LBSDTM XPORT "&SDTMPATH/lb.xpt";
 LIBNAME ADLBC XPORT "&REFPATH/adlbc.xpt";
 
@@ -55,7 +72,7 @@ DATA LB_STEP_2;
 	LENGTH LBNRIND $8;
 	SET lb_sdtm;
 	WHERE LBCAT = 'CHEMISTRY'
-	  AND VISIT NOT IN ('AMBUL ECG REMOVAL', 'RETRIEVAL');   /* 非實驗室評估訪視 */
+	  AND VISIT NOT IN ('AMBUL ECG REMOVAL', 'RETRIEVAL');   /* visits that are not lab assessment visits */
 	KEEP STUDYID USUBJID LBSEQ LBTESTCD LBTEST LBCAT LBSTRESN LBSTRESC
 	     LBSTNRLO LBSTNRHI LBNRIND LBBLFL VISITNUM VISIT LBDY LBDTC;
 RUN;
@@ -148,7 +165,7 @@ DATA LB_STEP_4B_C;
 RUN;
 
 /*===================================================================================================
-						Derivation Chian 1
+						Derivation Chain 1
 ===================================================================================================*/
 /*Step 5A Derive ADY, ADT, A1LO, A1HI, AVAL for original */
 DATA LB_STEP_5A_O;
@@ -175,11 +192,11 @@ DATA LB_STEP_5B_C;
 	IF FIRST.PARAMCD THEN preval = .;
 	LBSTRESN_PRIOR = preval;
 
-	IF VISITNUM NE INT(VISITNUM) THEN AVAL = .;        /* 未排程訪視不算 AVAL */
+	IF VISITNUM NE INT(VISITNUM) THEN AVAL = .;        /* unscheduled visits: AVAL not derived */
 	ELSE IF LBBLFL = 'Y' THEN AVAL = .;
 	ELSE AVAL = ROUND((LBSTRESN - LBSTRESN_PRIOR)/(0.5*(LBSTNRHI-LBSTNRLO)), 0.1);
 
-	IF VISITNUM = INT(VISITNUM) THEN preval = LBSTRESN;  /* 只有排程訪視更新 prior */
+	IF VISITNUM = INT(VISITNUM) THEN preval = LBSTRESN;  /* only scheduled visits update the prior value */
 
 	ADY = LBDY;
 	A1LO = .;
@@ -190,7 +207,7 @@ DATA LB_STEP_5B_C;
 RUN;
 
 /*===================================================================================================
-						Derivation Chian 2
+						Derivation Chain 2
 ===================================================================================================*/
 
 /*Step 6A Derive AVISIT AVISITN ABLFL*/
@@ -295,8 +312,8 @@ RUN;
 
 
 /*===================================================================================================
-						Derivation Chian 2
-===================================================================================================*
+						Derivation Chain 3
+===================================================================================================*/
 
 /*Step 7A Derive BASE CHG R2A1LO R2A1HI BR2A1LO BR2A1HI */
 
@@ -310,19 +327,19 @@ DATA LB_STEP_7A_O;
 
 	RETAIN BASE BR2A1LO BR2A1HI;
 
-	IF FIRST.PARAMCD THEN DO;      /* 重置跟 ABLFL 無關,是進新群組就要做 */
+	IF FIRST.PARAMCD THEN DO;      /* reset at the start of every group, independent of ABLFL */
 		BASE    = .;
 		BR2A1LO = .;
 		BR2A1HI = .;
 	END;
 
-	IF ABLFL = 'Y' THEN DO;        /* 這裡只負責「填值」 */
+	IF ABLFL = 'Y' THEN DO;        /* fill the baseline values only */
 		BASE    = LBSTRESN;
 		BR2A1LO = AVAL / A1LO;
 		BR2A1HI = AVAL / A1HI;
 	END;
 
-	IF ABLFL = 'Y' THEN CHG = .;   /* baseline 沒有「相對於 baseline 的變化」 */
+	IF ABLFL = 'Y' THEN CHG = .;   /* no change from baseline on the baseline record */
 	ELSE CHG = AVAL - BASE;
 
 	R2A1LO = AVAL / A1LO;
@@ -413,7 +430,7 @@ RUN;
 DATA FOR_BNRIND;
 	SET LB_STEP_8A_O;
 
-	/* AVAL 維持缺失,只有判斷 ANRIND 時改用 censored 的數值 */
+	/* AVAL stays missing; the censored character result (e.g. "<0.5") is used only to derive ANRIND */
 	IF MISSING(LBSTRESN) AND NOT MISSING(LBSTRESC)
 	   THEN IND_VAL = INPUT(COMPRESS(LBSTRESC, '<>='), 12.);
 	   ELSE IND_VAL = AVAL;
@@ -575,12 +592,6 @@ DATA ADLBC_STEP_12_MERGE;
 	;
 RUN;
 
-PROC CONTENTS DATA = ADLBC_STD;
-RUN;
-
-PROC CONTENTS DATA = ADLBC_STEP_12_MERGE;
-RUN;
-
 /*=================================================================================================
 								Pseudo_Record
 ==================================================================================================*/
@@ -598,7 +609,7 @@ DATA ADLBC_FINAL;
 RUN;
 
 /*=================================================================================================
-								Compare ADLBC final
+						QC: compare with the CDISC reference ADLBC
 ==================================================================================================*/
 
 PROC SORT DATA = ADLBC_FINAL;
@@ -620,83 +631,4 @@ RUN;
 
 DATA ADAM.ADLBC_V1;
     SET ADLBC_FINAL;
-RUN;
-
-
-/*=================================================================================================
-									QC CHECK
-==================================================================================================*/
-
-
-
-PROC SQL;
-SELECT USUBJID, LBTESTCD, VISITNUM, LBSTRESN, LBSTRESC, LBORRES,
-       LBNRIND, LBSTNRLO, LBSTNRHI
-FROM lb_sdtm
-WHERE LBCAT = 'CHEMISTRY'
-  AND ( (USUBJID='01-701-1115' AND LBTESTCD='GLUC' AND VISITNUM=5)
-     OR (USUBJID='01-701-1363' AND LBTESTCD='BILI' AND VISITNUM=12)
-     OR (USUBJID='01-704-1323' AND LBTESTCD='BILI' AND VISITNUM=5)
-     OR (USUBJID='01-705-1031' AND LBTESTCD='BILI' AND VISITNUM=12)
-     OR (USUBJID='01-705-1393' AND LBTESTCD='BILI' AND VISITNUM=4)
-     OR (USUBJID='01-711-1036' AND LBTESTCD='BILI' AND VISITNUM=12) )
-ORDER BY USUBJID, LBTESTCD, VISITNUM;
-QUIT;
-
-PROC PRINT DATA = ADLBC_FINAL NOOBS;
-	WHERE USUBJID = '01-704-1323'
-	  AND PARAMCD IN ('BILI','_BILI','ALP','_ALP','K','_K','PHOS','_PHOS');
-	VAR PARAMCD VISITNUM AVISITN LBSTRESN AVAL ALBTRVAL ANL01FL;
-RUN;
-
-
-PROC SORT DATA = ADLBC_FINAL OUT = _F; BY USUBJID PARAMCD VISITNUM AVISITN; RUN;
-PROC SORT DATA = ADLBC_STD   OUT = _S; BY USUBJID PARAMCD VISITNUM AVISITN; RUN;
-
-DATA EXTRA_72;
-	MERGE _F (IN=F)
-	      _S (IN=S KEEP=USUBJID PARAMCD VISITNUM AVISITN);
-	BY USUBJID PARAMCD VISITNUM AVISITN;
-	IF F AND NOT S;
-	KEEP USUBJID PARAMCD VISITNUM AVISITN AVISIT AENTMTFL AVAL;
-RUN;
-
-PROC FREQ DATA = EXTRA_72;
-	TABLES USUBJID*AVISITN / LIST MISSING;
-RUN;
-
-/* 先看這兩位的未排程訪視長什麼樣 */
-PROC PRINT DATA = EXTRA_72 NOOBS;
-	WHERE PARAMCD IN ('ALB','_ALB');
-	VAR USUBJID PARAMCD VISITNUM AVISITN AVISIT ADY ADT AVAL AENTMTFL;
-RUN;
-
-/* 再看這兩位在原始 LB 的完整訪視序列,以及治療期間 */
-PROC SQL;
-SELECT DISTINCT a.USUBJID, a.VISITNUM, a.VISIT, a.LBDY,
-       b.TRTSDT FORMAT=DATE9., b.TRTEDT FORMAT=DATE9.
-FROM lb_sdtm AS a
-LEFT JOIN ADSL_V1 AS b ON a.USUBJID = b.USUBJID
-WHERE a.LBCAT = 'CHEMISTRY'
-  AND a.USUBJID IN ('01-704-1025','01-715-1107')
-ORDER BY a.USUBJID, a.VISITNUM;
-QUIT;
-
-PROC FREQ DATA = lb_sdtm;
-	WHERE LBCAT = 'CHEMISTRY';
-	TABLES VISITNUM*VISIT / LIST MISSING;
-	TITLE '來源 LB 的所有訪視';
-RUN;
-
-PROC FREQ DATA = ADLBC_STD;
-	TABLES VISITNUM*VISIT / LIST MISSING;
-	TITLE '參考資料集實際納入的訪視';
-RUN;
-TITLE;
-
-
-
-
-DATA ADAM.ADLBC_V1;
-	SET LB_STEP_14;
 RUN;

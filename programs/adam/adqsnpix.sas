@@ -1,3 +1,22 @@
+/*==========================================================================
+  Program   : adqsnpix.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADQSNPIX (NPI-X Item Analysis Dataset, BDS)
+              - 12 item scores and the NPI-X (9) total (NPTOT)
+              - Two-week analysis windows from ADY (SAP 8.2) and ANL01FL
+              - Derived parameter NPTOTMN: mean of the window-selected NPTOT
+                values from Week 4 to Week 24 (DTYPE = 'AVERAGE'), plus a
+                Baseline record per subject
+  Input     : ADAM.ADSL_V1, SDTM QS (NPI-X)
+              Reference ADQSNPIX (adqsnpix.xpt) - used for QC comparison
+  Output    : ADAM.ADQSNPIX_V1
+  Spec      : CDISCPILOT01 define.xml (ADQSNPIX); SAP 8.2, 10.2.1
+  Run after : setup.sas, adsl.sas
+  QC result : NPTOTMN reproduces the n, mean, SD and median of CSR Table
+              14-3.12; remaining differences from the reference dataset are
+              documented in STEP 11 and docs/qc_summary.md.
+==========================================================================*/
+
 LIBNAME QSSDTM XPORT "&SDTMPATH/qs.xpt";
 LIBNAME ADQSNPIX XPORT "&REFPATH/adqsnpix.xpt";
 
@@ -16,7 +35,7 @@ RUN;
 /*=================================================================================================
 								Derivation Chain 0
 ==================================================================================================*/
-/*STEP 1 Derive ADSL derictly*/
+/*STEP 1 Derive variables from ADSL directly*/
 
 DATA ADSL_STEP_1;
 	LENGTH RACE $32;
@@ -28,7 +47,7 @@ DATA ADSL_STEP_1;
 	     RACEN SEX ITTFL EFFFL COMP24FL;
 RUN;
 
-/*STEP 2 Derive QS derictly*/
+/*STEP 2 Derive variables from QS directly*/
 DATA QS_STEP_2;
 	SET QS_SDTM;
 	WHERE QSTESTCD IN ('NPITM01S','NPITM02S','NPITM03S','NPITM04S','NPITM05S','NPITM06S','NPITM07S'
@@ -69,7 +88,7 @@ NPTOTMN|14|Mean NPI-X (9) Total (Week 4 to 24)|DERIVED
 RUN;
 
 /*============================================================================================
-							Derivation Chain 1  without NPTOMN
+							Derivation Chain 1 (all parameters except NPTOTMN)
 ============================================================================================*/
 /*STEP 4 Merge QS_STEP_2 and ADSL and PARAM_LOOKUP*/
 PROC SORT DATA = adsl_step_1;
@@ -111,7 +130,7 @@ DATA ADQSNPIX_STEP_5;
 RUN;
 
 /*============================================================================================
-							Derivation Chain 2 without NPTOMN
+							Derivation Chain 2 (all parameters except NPTOTMN)
 ============================================================================================*/
 /*STEP 6 Derive AVAL, BASE, CHG, ABLFL*/
 /* CHG / PCHG on baseline records
@@ -251,7 +270,7 @@ PROC PRINT DATA = ANL_CNT;
 RUN;
 
 /*============================================================================================
-							Derivation Chain 1 with NPTOTMN
+							Derivation Chain 3: derived parameter NPTOTMN
 ============================================================================================*/
 /*STEP 9 Derive AVAL, BASE, CHG, PCHG, ABLFL, ANL01FL, DTYPE, PARAMCD*/
 
@@ -317,9 +336,6 @@ RUN;
 PROC PRINT DATA = CHK;
 RUN;
 /*===============================================================================*/
-
-PROC PRINT DATA =NPTOTMN_MEAN;
-RUN;
 
       
 DATA NPTOTMN_MEAN_FOR_STACK;
@@ -502,7 +518,10 @@ PROC SORT DATA = ADQSNPIX_STEP_10;
 RUN;
 
 
-/*STEP 11 QC*/
+/*=================================================================================================
+				STEP 11 QC: record counts, comparison with the reference dataset,
+				and NPTOTMN summary statistics vs CSR Table 14-3.12
+==================================================================================================*/
 
 /* 11a. Record counts by PARAMCD vs reference dataset.
         Expected: all DIFF = 0 except NPTOTMN (468 vs 489, DIFF = -21). */
@@ -561,7 +580,9 @@ PROC MEANS DATA = ADQSNPIX_STEP_10 N MEAN STD MEDIAN MIN MAX MAXDEC = 2;
 RUN;
 
 
-
+/*=================================================================================================
+										Save ADQSNPIX
+==================================================================================================*/
 DATA ADAM.ADQSNPIX_V1;
 	SET ADQSNPIX_STEP_10;
 RUN;

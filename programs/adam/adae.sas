@@ -1,3 +1,14 @@
+/*==========================================================================
+  Program   : adae.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADAE (Adverse Events Analysis Dataset, OCCDS)
+  Input     : ADAM.ADSL_V1, SDTM AE
+              Reference ADAE (adae.xpt) - used for QC comparison
+  Output    : ADAM.ADAE_V1
+  Spec      : CDISCPILOT01 define.xml (ADAE) and SAP
+  Run after : setup.sas, adsl.sas
+==========================================================================*/
+
 LIBNAME AESDTM XPORT "&SDTMPATH/ae.xpt";
 
 DATA ADSL_V1;
@@ -9,10 +20,10 @@ DATA AE_SDTM;
 RUN;
 
 /*==========================================================================
-				Derivation Chian 1
+				Derivation Chain 1
 ===========================================================================*/
 
-/*Step 1 Derive variales directly from ADSL_V1 */
+/*Step 1 Derive variables directly from ADSL_V1 */
 DATA ADSL_STEP_1;
 	SET ADSL_V1;
 	TRTA = TRT01A;
@@ -20,7 +31,7 @@ DATA ADSL_STEP_1;
 	KEEP STUDYID SITEID USUBJID TRTA TRTAN AGE AGEGR1 AGEGR1N RACE RACEN SEX SAFFL TRTSDT TRTEDT;
 RUN;
 
-/*Step 2 Derive variales directly from AE*/
+/*Step 2 Derive variables directly from AE*/
 DATA AE_STEP_2;
 	SET AE_SDTM;
 	
@@ -46,7 +57,7 @@ DATA ADAE_STEP_3;
 RUN;
 
 /*==========================================================================
-				Derivation Chian 2
+				Derivation Chain 2
 ===========================================================================*/
 /*Step 4 Derive ASTDT, ASTDTF*/
 DATA DERIVE_FROM_AESTDTC;
@@ -149,7 +160,7 @@ DATA ADAE_STEP_5_AENDT;
 RUN;
 
 /*==========================================================================
-				Derivation Chian 2
+				Derivation Chain 3
 ===========================================================================*/
 
 /*Step 6 Derive TRTEMFL */
@@ -188,7 +199,7 @@ RUN;
 
 
 /*==========================================================================
-				Derivation Chian 3
+				Derivation Chain 4
 ===========================================================================*/
 
 /*Step 7 Derive ADURN, ADURU */
@@ -235,7 +246,7 @@ DATA ADAE_STEP_7_ADURN;
 RUN;
 
 /*==========================================================================
-				Derivation Chian 4 for FL
+				Derivation Chain 5: occurrence flags
 ===========================================================================*/
 DATA DERIVE_FOR_FL_1;
 	SET adae_step_7_adurn;
@@ -452,14 +463,8 @@ DATA ADAE_STEP_15_AOCC01FL;
 RUN;
 
 /*==========================================================================
-					Compare ADAE_STD and ADAE_final
+					Final ADAE: attributes and variable order
 ===========================================================================*/
-LIBNAME ADSL XPORT "&REFPATH/adae.xpt";
-
-DATA ADAE_STD;
-    SET ADSL.adae;
-RUN;
-
 DATA ADAE_FINAL;
 	LENGTH STUDYID $12 SITEID $3 USUBJID $11 TRTA $20
 	       AGEGR1 $5 RACE $32 SEX $1 SAFFL $1
@@ -556,6 +561,15 @@ DATA ADAE_FINAL;
            CQ01NAM AOCC01FL;
 RUN;
 
+/*==========================================================================
+				QC: compare with the CDISC reference ADAE
+===========================================================================*/
+LIBNAME ADAEREF XPORT "&REFPATH/adae.xpt";
+
+DATA ADAE_STD;
+    SET ADAEREF.adae;
+RUN;
+
 PROC SORT DATA = ADAE_STD; 
 	BY STUDYID USUBJID AETERM ASTDT AESEQ;
 RUN;
@@ -569,21 +583,9 @@ PROC COMPARE BASE = adae_std COMPARE = ADAE_FINAL;
 RUN;
 
 
-PROC PRINT DATA = ADAE_FINAL (KEEP = USUBJID ADURU ADURN ASTDY ASTDTF ASTDT);
-	WHERE USUBJID = '01-716-1418';
-RUN;
-
+/*==========================================================================
+							Save ADAE
+===========================================================================*/
 DATA ADAM.ADAE_V1;
     SET ADAE_FINAL;
 RUN;
-
-
-DATA CHK;
-    SET ADAE_STD;
-    ADURN_MISS = MISSING(ADURN);
-RUN;
-
-PROC FREQ DATA = CHK;
-    TABLES ASTDTF * ADURN_MISS / LIST MISSING;
-RUN;
-

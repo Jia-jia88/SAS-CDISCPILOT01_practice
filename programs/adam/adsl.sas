@@ -1,3 +1,16 @@
+/*==========================================================================
+  Program   : adsl.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADSL (Subject-Level Analysis Dataset)
+  Input     : SDTM DM, DS, EX, SV, VS, SC, MH, QS
+              Reference ADSL (adsl.xpt) - used for QC comparison
+  Output    : ADAM.ADSL_V1
+  Spec      : CDISCPILOT01 define.xml (ADSL) and SAP
+  Run after : setup.sas
+  Known issues: CUMDOSE and AVGDD are not yet derived (work-in-progress
+              code is kept at the end of this program and is not run).
+              See docs/review_notes.md for all open items.
+==========================================================================*/
 
 libname dmsdtm xport "&SDTMPATH/dm.xpt";
 libname dssdtm xport "&SDTMPATH/ds.xpt";
@@ -37,7 +50,7 @@ run;
 /*==============================================================================================
 									Derivation Chain 1
 ================================================================================================*/
-/*Step 1 Derive varaibles from DM */
+/*Step 1 Derive variables from DM */
 
 DATA ADSL_STEP_1_DM;
 	RETAIN STUDYID SUBJID USUBJID ARM TRT01P TRT01A AGE AGEU RACE SEX ETHNIC RFSTDTC RFENDTC;
@@ -56,25 +69,25 @@ FROM ADSL_STEP_1_DM
 QUIT;
 %PUT &usubjid_inclusive;
 
-/*Step 2 Derive vairables from EX*/
+/*Step 2 Derive variables from EX*/
 DATA ADSL_STEP_2_EX;
 	SET ex_sdtm;
 	WHERE USUBJID IN (&usubjid_inclusive);
 RUN;
 
-/*Step 3 Derive vairables from SV*/
+/*Step 3 Derive variables from SV*/
 DATA ADSL_STEP_3_SV;
 	SET sv_sdtm;
 	WHERE USUBJID IN (&usubjid_inclusive);
 RUN;
 
-/*Step 4 Derive vairables from DS*/
+/*Step 4 Derive variables from DS*/
 DATA ADSL_STEP_4_DS;
 	SET ds_sdtm;
 	WHERE USUBJID IN (&usubjid_inclusive);
 RUN;
 
-/*Step 5 Derive vairables from VS*/
+/*Step 5 Derive variables from VS*/
 DATA ADSL_STEP_5_VS;
 	SET vs_sdtm;
 	WHERE USUBJID IN (&usubjid_inclusive)
@@ -85,7 +98,7 @@ PROC FREQ DATA = adsl_step_5_vs;
 	TABLES VSTESTCD / MISSING;
 RUN;
 
-/*Step 6 Derive vairables from SC*/
+/*Step 6 Derive variables from SC*/
 DATA ADSL_STEP_6_SC;
 	SET sc_sdtm;
 	WHERE USUBJID IN (&usubjid_inclusive);
@@ -155,13 +168,6 @@ RUN;
 
 
 /*Step 8 Derive TRTEDT from EX */
-
-PROC SQL;
-SELECT
-DISTINCT EXENDTC AS A
-FROM ADSL_STEP_2_EX
-;
-QUIT;
 
 PROC SORT DATA = ADSL_STEP_2_EX;
 	BY USUBJID VISITNUM VISIT;
@@ -292,9 +298,6 @@ DATA ADSL_COMPFL;
 	WEEK24 = 'WEEK 24'N;
 	DROP 'WEEK 8'N 'WEEK 16'N 'WEEK 24'N;
 
-RUN;
-
-PROC PRINT DATA = ADSL_COMPFL;
 RUN;
 
 DATA ADSL_STEP_11_COMPFL;
@@ -614,9 +617,6 @@ DATA ADSL_STEP_22_EFFFL;
 	ELSE EFFFL = 'Y';
 RUN;
 
-PROC PRINT DATA = ADSL_STEP_22_EFFFL;
-RUN;
-
 /*Step 23 Derive TRTDUR*/
 
 DATA ADSL_STEP_23_TRTDUR;
@@ -637,7 +637,9 @@ DATA ADSL_STEP_24_SITEGR1;
 RUN;
 
 /*========================================================================================
-						COMPARE between ADSL_myself to STD
+		QC: compare the derived ADSL with the CDISC reference ADSL
+		NOTE: &name_order (variable list and order of the reference dataset) is also
+		      used by the KEEP statement of ADAM.ADSL_V1 below - see docs/review_notes.md
 ==========================================================================================*/
 libname adsladam xport "&REFPATH/adsl.xpt";
 
@@ -691,7 +693,9 @@ RUN;
 
 
 /*=========================================================================================
-	ADSL_V1 has some problem and needs to check CUMDOSE, AVGDD.
+	Final ADSL: variable attributes per define.xml
+	Open issue: CUMDOSE and AVGDD are declared in ATTRIB but not yet derived; they are
+	dropped by KEEP &name_order (see docs/review_notes.md).
 ===========================================================================================*/
 
 DATA ADAM.ADSL_V1;
@@ -750,8 +754,12 @@ DATA ADAM.ADSL_V1;
 RUN;
 
 /*========================================================================================
-			CUMDOSE, AVGDD need to check (Code below may have some mistakes)
+	WORK IN PROGRESS - CUMDOSE / AVGDD (not yet validated)
+	The code is wrapped in a macro that is NOT called, so it is kept for reference
+	but does not run as part of the pipeline. Known problem: TRT01AN = 2 should be
+	the High Dose code 81 (TRT01AN uses the dose values 0 / 54 / 81).
 ==========================================================================================*/
+%MACRO WIP_CUMDOSE;
 
 /*Step 24 Derive CUMDOSE*/
 
@@ -856,3 +864,6 @@ RUN;
 PROC PRINT DATA = ADSL_STEP_2_EX;
 	WHERE USUBJID IN (&USUBJID_PROBLEM);
 RUN;
+
+%MEND WIP_CUMDOSE;
+/* %WIP_CUMDOSE;  -- intentionally not called */

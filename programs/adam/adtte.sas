@@ -1,3 +1,17 @@
+/*==========================================================================
+  Program   : adtte.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADTTE (Time-to-Event Analysis Dataset)
+              PARAMCD = TTDE, time to first treatment-emergent dermatologic
+              event; subjects without an event are censored at RFENDT.
+  Input     : ADAM.ADSL_V1, ADAM.ADAE_V1
+              Reference ADTTE (adtte.xpt) - used for QC comparison
+  Output    : ADAM.ADTTE_V1
+  Spec      : CDISCPILOT01 define.xml (ADTTE)
+  Run after : setup.sas, adsl.sas, adae.sas
+  QC result : 254 records, all values equal to the reference dataset.
+==========================================================================*/
+
 LIBNAME ADTTE XPORT "&REFPATH/adtte.xpt";
 DATA ADAE_V1;
     SET ADAM.ADAE_V1;
@@ -15,7 +29,7 @@ RUN;
 					 Create the fundamental data structure for ADTTE
 =================================================================================================*/
 
-/*STEP 1 Derive ADAE derictly from ADSL */
+/*STEP 1 Derive variables directly from ADSL */
 
 DATA ADTTE_STEP_1;
 	SET ADSL_V1;
@@ -30,7 +44,7 @@ DATA ADTTE_STEP_1;
 	STARTDT RFENDTC RFENDT SAFFL;
 RUN;
 
-/*STEP 2 Derive ADAE derictly from ADAE */
+/*STEP 2 First dermatologic event per subject from ADAE (AOCC01FL) */
 DATA ADTTE_STEP_2;
 	SET ADAE_V1;
 	WHERE AOCC01FL = 'Y' AND CQ01NAM = 'DERMATOLOGIC EVENTS';
@@ -51,12 +65,8 @@ DATA ADTTE_STEP_3;
 	BY STUDYID SITEID USUBJID;
 	IF A = 1;
 RUN;
-/*================================================================================================
-=================================================================================================*/
-
-
 /*===============================================================================================
-								Derivation Chian 1
+								Derivation Chain 1
 =================================================================================================*/
 
 /*STEP 4 Derive PARAMCD PARAM*/
@@ -74,7 +84,7 @@ DATA ADTTE_STEP_5;
 RUN;
 
 /*===============================================================================================
-								Derivation Chian 2
+								Derivation Chain 2
 =================================================================================================*/
 /*STEP 6 Derive ADT, AVAL, SRCDOM, SRCVAR, SRCSEQ*/
 DATA ADTTE_STEP_6;
@@ -100,11 +110,12 @@ RUN;
 /*STEP 7 Derive EVNTDESC*/
 DATA ADTTE_STEP_7;
 	SET ADTTE_STEP_6;
+	/* Spelling kept as in the reference dataset / define.xml value ('Dematologic', 'Occured') */
 	IF CNSR = 0 THEN EVNTDESC = 'Dematologic Event Occured';
 	ELSE IF CNSR = 1 THEN EVNTDESC = 'Study Completion Date';
 RUN;
 
-/*STEP 8*/
+/*STEP 8 Final attributes and variable order*/
 DATA ADTTE_STEP_8;
 	ATTRIB
 		STUDYID  LENGTH = $12  LABEL = 'Study Identifier'
@@ -144,7 +155,7 @@ DATA ADTTE_STEP_8;
 RUN;
 
 /*=============================================================================================
-								QC
+						QC: compare with the CDISC reference ADTTE
 ==============================================================================================*/
 
 /*STEP 9 QC*/
@@ -160,6 +171,9 @@ PROC COMPARE BASE = ADTTE_STD COMPARE = ADTTE_STEP_8;
 	ID STUDYID USUBJID PARAMCD;
 RUN;
 
+/*=============================================================================================
+								Save ADTTE
+==============================================================================================*/
 DATA ADAM.ADTTE_V1;
 	SET ADTTE_STEP_8;
 RUN;

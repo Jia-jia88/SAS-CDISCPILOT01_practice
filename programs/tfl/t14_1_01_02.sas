@@ -106,7 +106,7 @@ RUN;
 PROC PRINT DATA = SUMMARY_TABLE;
 RUN;
 
-/* STEP 5 Caculate Percent*/
+/* STEP 5 Calculate Percent*/
 
 DATA PCT_TABLE;
 	SET SUMMARY_TABLE;
@@ -285,7 +285,7 @@ PROC TRANSPOSE DATA = COMPFL_WHY_TABLE OUT = COMPFL_WHY_TRANS(DROP = _NAME_ _LAB
 RUN;
 
 
-/*STEP 6 Caculate Percent*/
+/*STEP 6 Calculate Percent*/
 
 DATA COMP_REASON;
 	LENGTH Reason $40;

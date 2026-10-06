@@ -1,3 +1,16 @@
+/*==========================================================================
+  Program   : advs.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADVS (Vital Signs Analysis Dataset, BDS), including
+              End of Treatment pseudo-records (AVISITN = 99) for SYSBP,
+              DIABP, PULSE and WEIGHT.
+  Input     : ADAM.ADSL_V1, SDTM VS
+              Reference ADVS (advs.xpt) - used for QC comparison
+  Output    : ADAM.ADVS_V1
+  Spec      : CDISCPILOT01 define.xml (ADVS) and SAP section 11.6
+  Run after : setup.sas, adsl.sas
+==========================================================================*/
+
 LIBNAME ADVS XPORT "&REFPATH/advs.xpt";
 LIBNAME VSSDTM XPORT "&SDTMPATH/vs.xpt";
 
@@ -144,11 +157,6 @@ DATA ADVS_STEP_5;
 	
 RUN;
 
-/*PROC FREQ DATA = ADVS_STEP_5;
-	TABLES AVISIT*AVISITN / LIST MISSING;
-RUN;*/
-
-
 /*STEP 6 Derive AVAL, BASE, CHG, PCHG, ABLFL*/
 PROC SORT DATA = ADVS_STEP_5;
     BY STUDYID USUBJID PARAMCD ATPTN DESCENDING VSBLFL ADT VSSEQ;
@@ -212,18 +220,8 @@ DATA ADVS_STEP_8;
 	SET EOT_FL ADVS_STEP_7;
 RUN;
 
-PROC FREQ DATA = ADVS_STEP_9;
-	TABLES AVISITN*AVISIT*VISIT/LIST MISSING;
-	WHERE AVISITN = 99;
-RUN;
-
-PROC FREQ DATA = ADVS_STD;
-	TABLES AVISITN*AVISIT*VISIT/LIST MISSING;
-	WHERE AVISITN = 99;
-RUN;
-
 /*===============================================================================================
-								 			QC
+								 	Final ADVS
 =================================================================================================*/
 
 /*STEP 9 Final attributes, variable order, and sort*/
@@ -277,13 +275,11 @@ DATA ADVS_STEP_9 (LABEL = "Vital Signs Analysis Dataset");
          AVAL BASE CHG PCHG VISITNUM VISIT VSSEQ ANL01FL ABLFL;
 RUN;
 
-PROC CONTENTS DATA = ADVS_STEP_9;
-RUN;
-
-PROC CONTENTS DATA = ADVS_STD;
-RUN;
-
-
+/*===============================================================================================
+						QC: compare with the CDISC reference ADVS
+		EOT records: this program follows SAP 11.6 (last visit on or before Week 24);
+		the reference dataset also uses Week 26, so single-sided EOT records are expected.
+=================================================================================================*/
 PROC FREQ DATA = ADVS_STD;
 	TABLES VISITNUM*VISIT*AVISITN*AVISIT/LIST MISSING;
 	WHERE AVISITN = 99;
@@ -295,9 +291,6 @@ PROC FREQ DATA = ADVS_STEP_9;
 RUN;
 
 /*STEP 10 Compare*/
-
-
-
 PROC SORT DATA = ADVS_STEP_9;
 	BY STUDYID USUBJID VSSEQ AVISITN;
 RUN;

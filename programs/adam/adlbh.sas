@@ -1,3 +1,20 @@
+/*==========================================================================
+  Program   : adlbh.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADLBH (Laboratory Hematology Analysis Dataset, BDS)
+              Same structure as ADLBC: observed values, change from the
+              previous visit relative to the normal range ('_' parameters),
+              and End of Treatment pseudo-records (AVISITN = 99).
+  Input     : ADAM.ADSL_V1, SDTM LB (LBCAT = 'HEMATOLOGY')
+              Reference ADLBH (adlbh.xpt) - used for QC comparison
+  Output    : ADAM.ADLBH_V1
+  Spec      : CDISCPILOT01 define.xml (ADLBH) and SAP
+  Run after : setup.sas, adsl.sas
+  Notes     : Variable labels are read from the reference dataset
+              (&LABEL_ADLBH) and the ANRIND switch is set to 1 -
+              see docs/review_notes.md.
+==========================================================================*/
+
 LIBNAME LBSDTM XPORT "&SDTMPATH/lb.xpt";
 LIBNAME ADLBH XPORT "&REFPATH/adlbh.xpt";
 
@@ -144,7 +161,7 @@ DATA LB_STEP_4B_C;
 RUN;
 
 /*===========================================================================================
-						Derivation chain 1
+						Derivation Chain 1
 ============================================================================================*/
 
 /*Step 5A Derive ADY, ADT*/
@@ -194,13 +211,13 @@ DATA LB_STEP_6B_C;
     RETAIN preval;
     IF FIRST.PARAMCD THEN preval = .;
 
-    LBSTRESN_PRIOR = preval;                               /* 先讀 */
+    LBSTRESN_PRIOR = preval;                               /* read the prior value first */
 
-    IF VISITNUM NE INT(VISITNUM) THEN AVAL = .;            /* 未排程訪視不計算 */
+    IF VISITNUM NE INT(VISITNUM) THEN AVAL = .;            /* unscheduled visits: AVAL not derived */
     ELSE IF LBBLFL = 'Y' THEN AVAL = .;
     ELSE AVAL = ROUND((LBSTRESN - LBSTRESN_PRIOR) / (0.5*(LBSTNRHI - LBSTNRLO)), 0.1);
 
-    IF VISITNUM = INT(VISITNUM) THEN preval = LBSTRESN;    /* 只有排程訪視更新前一次的值 QC AVAL */
+    IF VISITNUM = INT(VISITNUM) THEN preval = LBSTRESN;    /* only scheduled visits update the prior value */
 
     DROP LBSTRESN_PRIOR preval;
 RUN;
@@ -321,7 +338,7 @@ PROC FREQ DATA = LB_STEP_7B_C;
 RUN;
 
 /*===========================================================================================
-						Derivation chain 2
+						Derivation Chain 2
 ============================================================================================*/
 /*Step 8A Derive CHG, R2A1LO, R2A1HI, BR2A1LO, BR2A1HI*/
 PROC SORT DATA = LB_STEP_7A_O;
@@ -447,20 +464,8 @@ RUN;
 
 /*Step 10A Derive ANRIND, BNRIND*/
 
-DATA LB_STEP_10A_BNRIND;
-	SET LB_STEP_9A_O;
-	
-	IF MISSING(AVAL) OR NMISS(LBSTNRLO, LBSTNRHI) > 0 THEN ANRIND = ' ';
-	ELSE IF AVAL < (0.5*LBSTNRLO)  THEN ANRIND = 'L';
-	ELSE IF AVAL > (1.5*LBSTNRHI)  THEN ANRIND = 'H';
-	ELSE ANRIND = 'N';
-	
-	IF ABLFL = 'Y' THEN BNRIND_BASE = ANRIND;
-	
-RUN;
-
-
-/* ANRIND 驗證實驗開關:1 = 模擬參考資料的寫法(僅驗證用);0 = 正式寫法 */
+/* ANRIND switch: 1 = mimic the reference dataset (verification only); 0 = rule per specification.
+   Currently set to 1 - see docs/review_notes.md */
 %LET ANRIND_EXP = 1;
 
 DATA LB_STEP_10A_BNRIND;
@@ -633,7 +638,10 @@ QUIT;
 
 
 
-/*Step 15 Compare the ADLBH_STEP_14 and ADLBH_STD*/
+/*=================================================================================================
+						QC: compare with the CDISC reference ADLBH
+==================================================================================================*/
+/*Step 15 Compare LB_STEP_14 with ADLBH_STD*/
 PROC SORT DATA = LB_STEP_14;
 	BY STUDYID USUBJID PARAMCD VISITNUM AVISITN;
 RUN;
@@ -646,39 +654,9 @@ PROC COMPARE BASE = ADLBH_STD COMPARE = LB_STEP_14;
 	ID STUDYID USUBJID PARAMCD VISITNUM AVISITN;
 RUN;
 
-/*Step 16 QC*/
-
-PROC COMPARE BASE = ADLBH_STD COMPARE = LB_STEP_14 NOPRINT OUT = CMP_OUT 
-OUTNOEQUAL OUTBASE OUTCOMP OUTDIF;
-  ID STUDYID USUBJID PARAMCD VISITNUM AVISITN;
-  VAR AVAL ABLFL BASE CHG A1LO A1HI;
-RUN;
-
-PROC PRINT DATA = CMP_OUT (OBS = 1000);
-RUN;
-
-
-
-
-PROC COMPARE BASE = ADLBH_STD COMPARE = LB_STEP_14 NOPRINT OUT = CMP_OUT_RATIO 
-OUTNOEQUAL OUTBASE OUTCOMP OUTDIF;
-  ID STUDYID USUBJID PARAMCD VISITNUM AVISITN;
-  VAR AVAL ALBTRVAL ANL01FL;
-RUN;
-
-PROC PRINT DATA = CMP_OUT_RATIO (OBS = 1000);
-RUN;
-
-
-
-PROC CONTENTS DATA = adlbh_std;
-RUN;
-
-PROC CONTENTS DATA = LB_STEP_14;
-RUN;
-
-
-
+/*===============================================================================================
+									Save ADLBH
+================================================================================================*/
 DATA ADAM.ADLBH_V1;
 	SET LB_STEP_14;
 RUN;

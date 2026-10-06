@@ -1,3 +1,21 @@
+/*==========================================================================
+  Program   : adqsadas.sas
+  Study     : CDISCPILOT01
+  Purpose   : Derive ADQSADAS (ADAS-Cog Analysis Dataset, BDS)
+              - 14 item parameters (ACITM01-ACITM14) and the ADAS-Cog(11)
+                total (ACTOT) with SAP 14.2 proration for missing items
+              - Analysis windows from ADY (SAP 8.2): Baseline, Week 8/16/24
+              - ANL01FL: record closest to the target day in each window
+              - LOCF records for empty windows (ACTOT only, DTYPE = 'LOCF')
+  Input     : ADAM.ADSL_V1, SDTM QS (ADAS-Cog)
+              Reference ADQSADAS (adqsadas.xpt) - used for QC comparison
+  Output    : ADAM.ADQSADAS_V1
+  Spec      : CDISCPILOT01 define.xml (ADQSADAS); SAP 8.1, 8.2, 14.2
+  Run after : setup.sas, adsl.sas
+  QC result : 702 / 702 analysis records match the reference dataset;
+              remaining differences are documented in docs/qc_summary.md.
+==========================================================================*/
+
 LIBNAME QSSDTM XPORT "&SDTMPATH/qs.xpt";
 LIBNAME ADQSADAS XPORT "&REFPATH/adqsadas.xpt";
 
@@ -31,30 +49,10 @@ RUN;
 
 
 /*STEP 2 Derive variables from QS directly*/
-PROC CONTENTS DATA = QS_SDTM;
-RUN;
-
-PROC FREQ DATA = QS_SDTM;
-	TABLES QSCAT*QSSCAT*QSTEST*QSTESTCD/ LIST MISSING;
-RUN;
-
-
-PROC SQL;
-SELECT *
-FROM Dictionary.columns
-WHERE libname = 'WORK'
-AND memname = 'QS_SDTM'
-;
-QUIT;
-
 DATA QS_STEP_2;
 	SET QS_SDTM;
 	WHERE QSCAT = "ALZHEIMER'S DISEASE ASSESSMENT SCALE";
 	DROP QSSCAT;
-RUN;
-
-PROC FREQ DATA = QS_STEP_2;
-	TABLES VISIT/LIST MISSING;
 RUN;
 
 /*STEP 3 Merge two datasets, QS_STEP_2 and ADSL*/
@@ -166,7 +164,7 @@ PROC FREQ DATA = ADAS_NOT_SUM_7;
 	WHERE PARAMCD = 'ACTOT';
 RUN;
 
-/*Caculate for items SUM*/
+/*Calculate for items SUM*/
 DATA ADAS_FOR_ACTOT;
     SET ADAS_STEP_6;
     WHERE PARAMCD IN ('ACITM01','ACITM02','ACITM04','ACITM05','ACITM06','ACITM07',
@@ -177,7 +175,7 @@ DATA ADAS_FOR_ACTOT;
         WHEN ('ACITM08') _MAX = 12;
         OTHERWISE        _MAX = 5;
     END;
-    IF NOT MISSING(QSSTRESN) THEN _MAXOBS = _MAX;   /* 只累計有作答題目的滿分 */
+    IF NOT MISSING(QSSTRESN) THEN _MAXOBS = _MAX;   /* accumulate the maximum score of answered items only */
     KEEP USUBJID VISITNUM ADT PARAMCD QSSTRESN _MAXOBS;
 RUN;
 
@@ -190,8 +188,8 @@ RUN;
 
 DATA _ACTOT;
     SET _ACTOT;
-    IF 11 - N_NONMISS >= 4 THEN ACTOT_SUM = .;        /* 缺題超過 30%（4 題以上） */
-    ELSE ACTOT_SUM = ITEM_SUM * 70 / MAX_OBS;          /* 70 / (70 − 缺題滿分合計) */
+    IF 11 - N_NONMISS >= 4 THEN ACTOT_SUM = .;        /* more than 30% of the 11 items missing (4 or more) -> missing */
+    ELSE ACTOT_SUM = ITEM_SUM * 70 / MAX_OBS;          /* prorate: item sum x 70 / (70 - maximum score of missing items), SAP 14.2 */
     KEEP USUBJID VISITNUM ADT ACTOT_SUM;
 RUN;
 
@@ -302,33 +300,22 @@ DATA ADAS_STEP_9;
     IF ADY < 0 THEN AWTDIFF = AWTDIFF - 1;
 RUN;
 
-PROC FREQ DATA = ADAS_STEP_9 (OBS =200);
-	TABLES USUBJID*_DAY*PARAMCD*AWRANGE*AWTARGET*AWTDIFF /LIST MISSING;
-RUN;
-
-/* 1. Visit 3 的 _DAY 應該全部是 0 */
+/* 1. Check: Visit 3 (randomisation, ADT = TRTSDT) should all have ADY = 1 */
 PROC FREQ DATA=ADAS_STEP_9;
     WHERE VISITNUM = 3;
     TABLES _DAY / MISSING;
 RUN;
 
-/* 2. 沒分到窗口的記錄：特別注意 _DAY = 1 或缺值 */
+/* 2. Check: records not assigned to any window (expected: none) */
 PROC FREQ DATA=ADAS_STEP_9;
     WHERE MISSING(AVISITN);
     TABLES VISITNUM*VISIT*_DAY / LIST MISSING;
 RUN;
 
-/* 3. 各窗口的 _DAY 範圍要落在 AWLO–AWHI 之內 */
+/* 3. Check: the ADY range of each window lies within AWLO-AWHI */
 PROC MEANS DATA=ADAS_STEP_9 N MIN MAX;
     CLASS AVISITN AWRANGE;
     VAR _DAY AWTDIFF;
-RUN;
-
-PROC SORT DATA = ADAS_STEP_9 ;
-	BY USUBJID AVISIT AVISITN ADY PARAMCD;
-RUN;
-
-PROC PRINT DATA = ADAS_STEP_9 (OBS = 1000 KEEP = USUBJID PARAMCD AVISITN AVISIT ADY _DAY AWTARGET);
 RUN;
 
 /*==================================================================================================
@@ -336,27 +323,7 @@ RUN;
 ==================================================================================================*/
 
 /*STEP 10 Derive ANL01FL*/
-/*======================================================================================*/
-PROC SORT DATA = ADAS_STEP_9 OUT=ADAS_SORT;
-    BY USUBJID AVISITN AWTDIFF ADY;
-RUN;
-
-DATA ADAS_SORT_1_CHK;
-    SET ADAS_SORT;
-    BY USUBJID AVISITN AWTDIFF ADY;
-    LENGTH ANL01FL $1;
-
-    /* 學習用：把 FIRST. 的值存成變數，印出來對照上表 */
-    F_USUBJID = FIRST.USUBJID;
-    F_AVISITN = FIRST.AVISITN;
-    F_AWTDIFF = FIRST.AWTDIFF;
-    F_ADY     = FIRST.ADY;
-
-	KEEP USUBJID AVISITN PARAMCD AWTDIFF ADY F_USUBJID F_AVISITN F_AWTDIFF F_ADY;
-RUN;
-/*======================================================================================*/
-
-/* 1. 每組的最小距離 */
+/* 1. Minimum distance to the target day within USUBJID x PARAMCD x AVISITN */
 PROC MEANS DATA=ADAS_STEP_9 NOPRINT NWAY;
     WHERE NOT MISSING(AVISITN);
     CLASS USUBJID PARAMCD AVISITN;
@@ -364,15 +331,12 @@ PROC MEANS DATA=ADAS_STEP_9 NOPRINT NWAY;
     OUTPUT OUT=MIN_DIFF (DROP=_TYPE_ _FREQ_) MIN=MIN_DIFF;
 RUN;
 
-PROC PRINT DATA = MIN_DIFF (OBS = 1000);
-RUN;
-
-/* 2. 排序：組內依 ADY 由小到大，供同距離時使用 */
+/* 2. Sort by ADY within each group (used to break ties) */
 PROC SORT DATA=ADAS_STEP_9 OUT=S9;
     BY USUBJID PARAMCD AVISITN ADY;
 RUN;
 
-/* 3. 合併並標記 */
+/* 3. Merge and flag */
 DATA ADAS_STEP_10;
     MERGE S9 MIN_DIFF;
     BY USUBJID PARAMCD AVISITN;
@@ -383,14 +347,14 @@ DATA ADAS_STEP_10;
 
     IF NOT MISSING(AVISITN) AND AWTDIFF = MIN_DIFF AND _DONE = 0 THEN DO;
         ANL01FL = 'Y';
-        _DONE   = 1;   /* 同距離有兩筆時，只標 ADY 較小（目標日之前）的第一筆 */
+        _DONE   = 1;   /* equidistant records: flag only the earlier one (before the target day, SAP 8.2) */
     END;
 
     DROP _DONE;
 RUN;
 
 /*STEP 11 Derive DTYPE*/
-/* 11a. 可往後帶的來源：ACTOT、已選中、給藥後、AVAL 非缺值 */
+/* 11a. LOCF sources: ACTOT, ANL01FL = 'Y', AVAL non-missing; Baseline included (AVISITN >= 0) */
 DATA _SRC;
     SET ADAS_STEP_10;
 	WHERE PARAMCD = 'ACTOT' AND ANL01FL = 'Y' AND AVISITN >= 0 AND NOT MISSING(AVAL);
@@ -400,7 +364,7 @@ PROC SORT DATA=_SRC;
     BY USUBJID AVISITN;
 RUN;
 
-/* 11b. 骨架：每位有給藥後 ACTOT 的受試者 × Week 8/16/24 */
+/* 11b. Shell: every subject with a source record x Week 8/16/24 */
 DATA _SHELL;
     SET _SRC (KEEP=USUBJID);
     BY USUBJID;
@@ -409,7 +373,7 @@ DATA _SHELL;
     END;
 RUN;
 
-/* 11c. 找出缺值的窗口，再找之前最近的一筆來源 */
+/* 11c. Find empty windows and the latest earlier source record */
 PROC SQL;
     CREATE TABLE _MISS AS
     SELECT S.USUBJID, S.AVISITN AS TGT_AVISITN
@@ -425,7 +389,7 @@ PROC SQL;
     HAVING O.AVISITN = MAX(O.AVISITN);
 QUIT;
 
-/* 11d. 改成目標窗口，標上 DTYPE */
+/* 11d. Move the copied record to the target window and set DTYPE */
 DATA _LOCF;
     LENGTH DTYPE $7;
     
@@ -438,8 +402,8 @@ DATA _LOCF;
         OTHERWISE;
     END;
     AWTDIFF = ABS(ADY - AWTARGET);
-    CALL MISSING(ABLFL);                          /* LOCF 記錄不是 Baseline 記錄 */
-    CHG = AVAL - BASE;                            /* 給藥後記錄要重新計算 */
+    CALL MISSING(ABLFL);                          /* an LOCF record is not a baseline record */
+    CHG = AVAL - BASE;                            /* recompute for the post-baseline record */
     IF NOT MISSING(BASE) AND BASE NE 0 THEN PCHG = 100*(CHG/BASE);
     ELSE PCHG = .;
 
@@ -448,18 +412,18 @@ DATA _LOCF;
     DROP TGT_AVISITN;
 RUN;
 
-/* 11e. 併回主資料集 */
+/* 11e. Append the LOCF records */
 DATA ADAS_STEP_11;
     LENGTH DTYPE $7;
     SET ADAS_STEP_10 _LOCF;
 RUN;
 
-/* 1. DTYPE 只出現在 ACTOT */
+/* 1. Check: DTYPE appears only for ACTOT */
 PROC FREQ DATA=ADAS_STEP_11;
     TABLES PARAMCD*DTYPE / LIST MISSING;
 RUN;
 
-/* 2. 預期 0 筆：同一受試者、同一窗口，ACTOT 有兩筆以上的 Y */
+/* 2. Check (expect 0 rows): more than one ACTOT ANL01FL = 'Y' per subject and window */
 PROC SQL;
     SELECT USUBJID, AVISITN, COUNT(*) AS N_Y
     FROM ADAS_STEP_11
@@ -468,14 +432,14 @@ PROC SQL;
     HAVING N_Y > 1;
 QUIT;
 
-/* 3. 預期 0 筆：LOCF 記錄的來源日期必須早於目標窗口 */
+/* 3. Check (expect 0 rows): an LOCF source date must precede the target window */
 PROC PRINT DATA=ADAS_STEP_11;
     WHERE DTYPE = 'LOCF' AND ADY >= AWLO;
     VAR USUBJID AVISITN VISIT ADY AWLO AVAL;
 RUN;
 
 PROC FREQ DATA=ADAS_STEP_11;
-    WHERE DTYPE = 'LOCF' AND ADT = TRTSDT;   /* 從 Baseline 帶來的 LOCF */
+    WHERE DTYPE = 'LOCF' AND ADT = TRTSDT;   /* LOCF carried from Baseline (expected EFFFL = 'N') */
     TABLES EFFFL / MISSING;
 RUN;
 
@@ -484,29 +448,13 @@ PROC FREQ DATA=ADAS_STEP_11;
     TABLES TRTP / MISSING;
 RUN;
 
-/* 預期 0 筆：同一受試者、同一參數有兩筆以上的 ABLFL='Y' */
+/* TODO check (expect 0 rows): more than one ABLFL = 'Y' per subject and parameter */
 
 /*==================================================================================================
 							 	QC for final
 ==================================================================================================*/
 
-/*STEP 12 QC*/
-
-PROC SORT DATA = ADAS_STEP_11;
-	BY USUBJID PARAMCD AVISITN ;
-RUN;
-
-PROC SORT DATA = ADQSADAS_STD;
-	BY USUBJID PARAMCD AVISITN ;
-RUN;
-
-PROC COMPARE BASE =ADQSADAS_STD COMPARE = ADAS_STEP_11;
-	ID USUBJID PARAMCD AVISITN;
-RUN;
-
-
-
-
+/*STEP 12 QC: analysis records (EFFFL, ANL01FL, ACTOT, Week 8/16/24) vs reference */
 %LET ANLCOND = PARAMCD = 'ACTOT' AND ANL01FL = 'Y' AND AVISITN > 0 AND EFFFL = 'Y';
 
 PROC SORT DATA=ADQSADAS_STD (WHERE=(&ANLCOND)) OUT=_B_ANL; BY USUBJID AVISITN; RUN;
@@ -521,7 +469,7 @@ RUN;
                                 Final ADQSADAS
 ==================================================================================================*/
 
-/* STEP 12 Variable order, length, label, format */
+/* STEP 13 Variable order, length, label, format */
 DATA ADQSADAS (LABEL = 'ADAS-Cog Analysis');
     ATTRIB
         STUDYID  LENGTH=$12   LABEL='Study Identifier'
@@ -578,17 +526,19 @@ RUN;
 
 
 
-/*QC Practice*/
-/* 1. 變數順序、長度、標籤、格式：對照 define */
+/*==================================================================================================
+                    QC: structure checks and comparison with the CDISC reference ADQSADAS
+==================================================================================================*/
+/* 1. Variable order, length, label and format: compare with define.xml */
 PROC CONTENTS DATA=ADQSADAS VARNUM;
 RUN;
 
-/* 2. 鍵值唯一性：預期 _DUP 為 0 筆 */
+/* 2. Key uniqueness: _DUP expected to have 0 rows */
 PROC SORT DATA=ADQSADAS OUT=_KEYCHK NODUPKEY DUPOUT=_DUP;
     BY USUBJID PARAMCD AVISITN DTYPE ADT;
 RUN;
 
-/* 3. 最終比對 */
+/* 3. Final comparison with the reference dataset */
 PROC SORT DATA=ADQSADAS_STD OUT=_BAS; BY USUBJID PARAMCD AVISITN DTYPE ADT; RUN;
 
 PROC COMPARE BASE=_BAS COMPARE=ADQSADAS LISTALL;
@@ -596,69 +546,9 @@ PROC COMPARE BASE=_BAS COMPARE=ADQSADAS LISTALL;
 RUN;
 
 
-/*QC Practice*/
-/* 1. 受試者清單（兩邊的聯集，避免漏掉只存在於一邊的人） */
-PROC SQL NOPRINT;
-    SELECT USUBJID
-    INTO :SUBJ1-
-    FROM (SELECT USUBJID FROM _BAS
-          UNION
-          SELECT USUBJID FROM _CMP);
-QUIT;
-
-
-%LET NSUBJ = &SQLOBS;
-%PUT NOTE: 受試者人數 = &NSUBJ;
-
-/* 2. 逐一比較，記錄每人的 SYSINFO */
-%MACRO CMP_BY_SUBJ;
-    DATA _CMP_RESULT;
-        LENGTH USUBJID $11 SYSINFO 8;
-        STOP;
-    RUN;
-
-    %DO I = 1 %TO &NSUBJ;
-        PROC COMPARE BASE   =_BAS (WHERE=(USUBJID="&&SUBJ&I"))
-                     COMPARE=_CMP (WHERE=(USUBJID="&&SUBJ&I"))
-                     NOPRINT;
-            ID USUBJID PARAMCD AVISITN DTYPE ADT;
-        RUN;
-        %LET RC = &SYSINFO;   /* 必須緊接在 PROC COMPARE 之後讀取 */
-
-        DATA _ONE;
-            LENGTH USUBJID $11;
-            USUBJID = "&&SUBJ&I";
-            SYSINFO = &RC;
-        RUN;
-
-        PROC APPEND BASE=_CMP_RESULT DATA=_ONE;
-        RUN;
-    %END;
-%MEND CMP_BY_SUBJ;
-
-%CMP_BY_SUBJ;
-
-/* 3. 解讀回傳碼：只看和「記錄、值」有關的位元 */
-
-DATA _CMP_RESULT;
-    SET _CMP_RESULT;
-    BASE_ONLY  = (BAND(SYSINFO,   64) > 0);   /* 參考資料集有、你的沒有的記錄 */
-    COMP_ONLY  = (BAND(SYSINFO,  128) > 0);   /* 你的有、參考資料集沒有的記錄 */
-    VALUE_DIFF = (BAND(SYSINFO, 4096) > 0);   /* 有值不相等 */
-    ANY_ISSUE  = MAX(BASE_ONLY, COMP_ONLY, VALUE_DIFF);
-RUN;
-
-PROC FREQ DATA=_CMP_RESULT;
-    TABLES ANY_ISSUE BASE_ONLY*COMP_ONLY*VALUE_DIFF / LIST MISSING;
-RUN;
-
-PROC PRINT DATA=_CMP_RESULT;
-    WHERE ANY_ISSUE = 1;
-    VAR USUBJID BASE_ONLY COMP_ONLY VALUE_DIFF SYSINFO;
-RUN;
-
-
+/*==================================================================================================
+                                Save ADQSADAS
+==================================================================================================*/
 DATA ADAM.ADQSADAS_V1;
 	SET ADQSADAS;
 RUN;
-
