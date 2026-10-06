@@ -1,4 +1,3 @@
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
 
 /*=================================================================================================
 		Table 14-2.01 Summary of Demographic and Baseline Characteristics (ITT population)
@@ -431,7 +430,7 @@ RUN;
 ====================================================================================*/
 ODS ESCAPECHAR = '^';
 OPTIONS NODATE NONUMBER ORIENTATION = LANDSCAPE MISSING = ' ';
-ODS RTF FILE = "/home/u63793342/t14_2_01.rtf" STYLE = JOURNAL;
+ODS RTF FILE = "&OUTPATH/t14_2_01.rtf" STYLE = JOURNAL;
 
 TITLE1 J=L "CDISC SDTM/ADaM Pilot Project" J=R "CDISCPILOT01";
 TITLE2 J=L "Protocol: CDISCPILOT01" J=R "Page ^{thispage} of ^{lastpage}";

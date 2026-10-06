@@ -1,5 +1,4 @@
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
-LIBNAME ADTTE XPORT "/home/u63793342/sasuser.v94/adtte.xpt";
+LIBNAME ADTTE XPORT "&REFPATH/adtte.xpt";
 DATA ADAE_V1;
     SET ADAM.ADAE_V1;
 RUN;

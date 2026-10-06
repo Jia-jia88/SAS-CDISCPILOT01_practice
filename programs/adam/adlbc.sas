@@ -1,6 +1,5 @@
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
-LIBNAME LBSDTM XPORT "/home/u63793342/sasuser.v94/lb.xpt";
-LIBNAME ADLBC XPORT "/home/u63793342/sasuser.v94/adlbc.xpt";
+LIBNAME LBSDTM XPORT "&SDTMPATH/lb.xpt";
+LIBNAME ADLBC XPORT "&REFPATH/adlbc.xpt";
 
 DATA ADSL_V1;
     SET ADAM.ADSL_V1;
@@ -619,7 +618,6 @@ RUN;
 									ADLBC_V1
 ================================================================================================*/
 
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
 DATA ADAM.ADLBC_V1;
     SET ADLBC_FINAL;
 RUN;
@@ -698,7 +696,6 @@ TITLE;
 
 
 
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
 
 DATA ADAM.ADLBC_V1;
 	SET LB_STEP_14;

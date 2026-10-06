@@ -1,4 +1,3 @@
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
 
 /*=================================================================================================
 							Table 14-1.01 Summary of Populations
@@ -150,7 +149,7 @@ RUN;
 /* STEP 8 Finish table*/
 OPTIONS NODATE NONUMBER ORIENTATION = LANDSCAPE;
 ODS ESCAPECHAR = '^';
-ODS RTF FILE = "/home/u63793342/sasuser.v94/t14_1_01_v2.rtf" STYLE = JOURNAL;
+ODS RTF FILE = "&OUTPATH/t14_1_01.rtf" STYLE = JOURNAL;
 
 TITLE1 J=L 'CDISC SDTM/ADaM Pilot Project' J=R 'CDISCPILOT01';
 TITLE2 J=L 'Protocol: CDISCPILOT01' J=R 'Page ^{thispage} of ^{lastpage}';
@@ -491,7 +490,7 @@ RUN;
 
 OPTIONS NODATE NONUMBER ORIENTATION = LANDSCAPE;
 ODS ESCAPECHAR = '^';
-ODS RTF FILE = "/home/u63793342/sasuser.v94/t14_1_02.rtf" STYLE = JOURNAL;
+ODS RTF FILE = "&OUTPATH/t14_1_02.rtf" STYLE = JOURNAL;
 
 TITLE1 J=L 'CDISC SDTM/ADaM Pilot Project' J=R 'CDISCPILOT01';
 TITLE2 J=L 'Protocol: CDISCPILOT01' J=R 'Page ^{thispage} of ^{lastpage}';

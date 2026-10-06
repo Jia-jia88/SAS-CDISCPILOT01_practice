@@ -1,12 +1,12 @@
 
-libname dmsdtm xport "/home/u63793342/sasuser.v94/dm.xpt";
-libname dssdtm xport "/home/u63793342/sasuser.v94/ds.xpt";
-libname exsdtm xport "/home/u63793342/sasuser.v94/ex.xpt";
-libname svsdtm xport "/home/u63793342/sasuser.v94/sv.xpt";
-libname vssdtm xport "/home/u63793342/sasuser.v94/vs.xpt";
-libname scsdtm xport "/home/u63793342/sasuser.v94/sc.xpt";
-libname mhsdtm xport "/home/u63793342/sasuser.v94/mh.xpt";
-libname qssdtm xport "/home/u63793342/sasuser.v94/qs.xpt";
+libname dmsdtm xport "&SDTMPATH/dm.xpt";
+libname dssdtm xport "&SDTMPATH/ds.xpt";
+libname exsdtm xport "&SDTMPATH/ex.xpt";
+libname svsdtm xport "&SDTMPATH/sv.xpt";
+libname vssdtm xport "&SDTMPATH/vs.xpt";
+libname scsdtm xport "&SDTMPATH/sc.xpt";
+libname mhsdtm xport "&SDTMPATH/mh.xpt";
+libname qssdtm xport "&SDTMPATH/qs.xpt";
 
 data dm_sdtm;
 	set dmsdtm.dm; 
@@ -639,7 +639,7 @@ RUN;
 /*========================================================================================
 						COMPARE between ADSL_myself to STD
 ==========================================================================================*/
-libname adsladam xport "/home/u63793342/sasuser.v94/adsl.xpt";
+libname adsladam xport "&REFPATH/adsl.xpt";
 
 DATA ADSL_COMPARE;
 	SET adsladam.adsl;
@@ -693,7 +693,6 @@ RUN;
 /*=========================================================================================
 	ADSL_V1 has some problem and needs to check CUMDOSE, AVGDD.
 ===========================================================================================*/
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
 
 DATA ADAM.ADSL_V1;
     ATTRIB

@@ -1,5 +1,4 @@
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
-LIBNAME AESDTM XPORT "/home/u63793342/sasuser.v94/ae.xpt";
+LIBNAME AESDTM XPORT "&SDTMPATH/ae.xpt";
 
 DATA ADSL_V1;
     SET ADAM.ADSL_V1;
@@ -455,7 +454,7 @@ RUN;
 /*==========================================================================
 					Compare ADAE_STD and ADAE_final
 ===========================================================================*/
-LIBNAME ADSL XPORT "/home/u63793342/sasuser.v94/adae.xpt";
+LIBNAME ADSL XPORT "&REFPATH/adae.xpt";
 
 DATA ADAE_STD;
     SET ADSL.adae;
@@ -574,7 +573,6 @@ PROC PRINT DATA = ADAE_FINAL (KEEP = USUBJID ADURU ADURN ASTDY ASTDTF ASTDT);
 	WHERE USUBJID = '01-716-1418';
 RUN;
 
-LIBNAME ADAM "/home/u63793342/sasuser.v94";
 DATA ADAM.ADAE_V1;
     SET ADAE_FINAL;
 RUN;
