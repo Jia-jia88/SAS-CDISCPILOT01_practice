@@ -18,6 +18,7 @@ The last dataset-level comparison was run on 2026-09-29.
 ### ADAE — Done
 - 1,191 records, all values equal.
 - Rule confirmed from the reference data: when the AE start date is imputed (`ASTDTF = 'D'`), ADURN is left missing (all 15 such records).
+- define.xml subsets AOCC01FL ("first treatment-emergent dermatological event") to `CQ01NAM = ''`, which excludes every dermatological event. Implemented as `CQ01NAM = 'DERMATOLOGIC EVENTS'`; this removed all 327 AOCC01FL differences (spec defect, to be corrected in define.xml).
 
 ### ADLBC / ADLBH — Done, known difference (reference dataset)
 - All values equal except **AVISIT** on unscheduled visits (1,482 records in ADLBC, 1,110 in ADLBH): the reference dataset holds `.` where the derived dataset is blank, consistent with a numeric missing value written through `PUT`. Tables use scheduled visits only, so no output is affected.
