@@ -1,0 +1,9 @@
+# Study data and SAS datasets are not stored in the repository (see data/README.md)
+*.xpt
+*.sas7bdat
+*.sas7bcat
+
+# Generated outputs and logs
+*.rtf
+*.log
+*.lst
