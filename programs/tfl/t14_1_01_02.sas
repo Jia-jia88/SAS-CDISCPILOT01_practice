@@ -1,3 +1,18 @@
+/*==========================================================================
+  Program   : t14_1_01_02.sas
+  Study     : CDISCPILOT01
+  Purpose   : Table 14-1.01 Summary of Populations
+              Table 14-1.02 Summary of End of Study Data (ITT population,
+              Fisher's exact tests)
+  Input     : ADAM.ADSL_V1
+  Output    : &OUTPATH/t14_1_01.rtf, &OUTPATH/t14_1_02.rtf
+  Spec      : SAP Templates 1 and 2; define.xml analysis results metadata
+  Run after : setup.sas, adsl.sas
+  Notes     : Both tables are in one program because Table 14-1.02 reuses
+              the treatment-group N (&N0 &N54 &N81 &N99) and ADSL_REPORT_1
+              created for Table 14-1.01.
+==========================================================================*/
+
 
 /*=================================================================================================
 							Table 14-1.01 Summary of Populations
@@ -13,7 +28,7 @@ RUN;
 DATA ADSL_REPORT_1;
 	SET ADAM.ADSL_V1;
 	OUTPUT;
-	TRT01PN = 99;          /* Total：Shell 有、Define 沒有 */
+	TRT01PN = 99;          /* Total column: present in the table shell, not in define.xml */
 	OUTPUT;
 	KEEP ITTFL SAFFL EFFFL COMP24FL DISCONFL TRT01PN DCREASCD;
 RUN;
@@ -103,8 +118,6 @@ DATA SUMMARY_TABLE;
 	RENAME '0'n = Placebo_N '54'n = Low_N '81'n =High_N '99'n = Total_N;
 RUN;
 
-PROC PRINT DATA = SUMMARY_TABLE;
-RUN;
 
 /* STEP 5 Calculate Percent*/
 
@@ -135,18 +148,7 @@ RUN;
 
 %PUT &N0 &N54 &N81 &N99;
 
-/* STEP 7 Finish table*/
-
-PROC REPORT DATA = PCT_TABLE NOWINDOWS SPLIT = '|';
-  COLUMN Population Placebo Low High Total;
-  DEFINE Population / ORDER ORDER = DATA 'Population' LEFT;
-  DEFINE Placebo    / DISPLAY "Placebo|(N=&N0)"               CENTER;
-  DEFINE Low        / DISPLAY "Xanomeline|Low Dose|(N=&N54)"  CENTER;
-  DEFINE High       / DISPLAY "Xanomeline|High Dose|(N=&N81)" CENTER;
-  DEFINE Total      / DISPLAY "Total|(N=&N99)"                CENTER;
-RUN;
-
-/* STEP 8 Finish table*/
+/* STEP 7 Output Table 14-1.01 to RTF*/
 OPTIONS NODATE NONUMBER ORIENTATION = LANDSCAPE;
 ODS ESCAPECHAR = '^';
 ODS RTF FILE = "&OUTPATH/t14_1_01.rtf" STYLE = JOURNAL;
@@ -178,19 +180,8 @@ FOOTNOTE;
 
 
 /*=================================================================================================
-		Table_14-1.02 Summary of Demographic and Baseline Characteristics (ITT population)
+		Table 14-1.02 Summary of End of Study Data (ITT population)
 ===================================================================================================*/
-
-/*================================Basic Check===================================*/
-proc freq data = ADAM.ADSL_V1;
-  table COMP24FL*TRT01P/chisq fisher exact;
-run;
-
-proc freq data = ADAM.ADSL_V1;
-  where COMP24FL="N";
-  table DCREASCD* TRT01P/ chisq fisher exact;
-run;
-/*==================================================================================*/
 
 /*============================ Completion Status ==================================*/
 
@@ -205,8 +196,6 @@ PROC FREQ DATA = REPORT_2_COMP NOPRINT;
 	TABLES COMP24FL * TRT01PN / LIST MISSING OUT = COMP24FL_TABLE(KEEP = COMP24FL TRT01PN COUNT);
 RUN;
 
-PROC PRINT DATA = COMP24FL_TABLE;
-RUN;
 
 /*STEP 2 TRANSPOSE*/
 PROC TRANSPOSE DATA = COMP24FL_TABLE OUT = COMP24FL_TRANS (DROP = _NAME_ _LABEL_);
@@ -215,8 +204,6 @@ PROC TRANSPOSE DATA = COMP24FL_TABLE OUT = COMP24FL_TRANS (DROP = _NAME_ _LABEL_
 	BY COMP24FL;
 RUN;
 
-PROC PRINT DATA = COMP24FL_TRANS;
-RUN;
 
 /*STEP 3 Calculate Percent*/
 
@@ -257,11 +244,6 @@ RUN;
 /*==================================================================================*/
 
 /*============================ Early Termination ====================================*/
-
-proc freq data = ADAM.ADSL_V1;
-  where COMP24FL="N";
-  table DCREASCD* TRT01PN/ chisq fisher exact;
-run;
 
 /*STEP 4 Create the pivot for COMP24FL DCREASCD*/
 DATA REPORT_2_EARLY;
@@ -359,26 +341,16 @@ DATA COMP_WHY_PCT;
  	KEEP Reason Placebo Low High Total BLK ORD;
 RUN;
 
-PROC PRINT DATA = COMP_WHY_PCT;
-RUN;
-
-PROC PRINT DATA = COMP_PCT;
-RUN;
 
 /*=================================================================================
 					STACK two datasets and caculate P-value
 =================================================================================*/
 
-/*CHISQ FISHER Test for COMP STATUS*/
-/*ODS TRACE ON;*/
+/*Fisher's exact test for completion status*/
 ODS OUTPUT FishersExact = Fish_EXACT_COMP;
 PROC FREQ DATA = ADAM.ADSL_V1;
 	TABLES COMP24FL*TRT01P / CHISQ FISHER EXACT;	
 	WHERE ITTFL = 'Y';
-RUN;
-/*ODS TRACE OFF;*/
-
-PROC PRINT DATA = Fish_EXACT_COMP;
 RUN;
 
 DATA _NULL_;
@@ -389,7 +361,7 @@ RUN;
 
 %PUT &P_COMP;
 
-/*CHISQ FISHER Test for COMP REASON*/
+/*Fisher's exact test: early termination due to adverse event*/
 
 DATA TEST_FOR_AE;
 	SET ADAM.ADSL_V1;
@@ -398,21 +370,13 @@ DATA TEST_FOR_AE;
 	KEEP AEFL TRT01PN;
 RUN;
 
-PROC PRINT DATA = TEST_FOR_AE;
-RUN;
-
-/*ODS TRACE ON;*/
 ODS OUTPUT FishersExact = Fisher_AE;
 PROC FREQ DATA = TEST_FOR_AE;
 	TABLES AEFL * TRT01PN / CHISQ FISHER EXACT;
 RUN;
-/*ODS TRACE OFF;*/
-
-PROC PRINT DATA = Fisher_AE;
-RUN;
 
 
-/*CHISQ FISHER Test for COMP REASON*/
+/*Fisher's exact test: early termination due to lack of efficacy*/
 DATA TEST_FOR_EF;
 	SET ADAM.ADSL_V1;
 	WHERE ITTFL = 'Y';
@@ -440,15 +404,11 @@ RUN;
 
 %PUT &P_COMP &P_AE &P_EF;
 
-PROC PRINT DATA = COMP_WHY_PCT;
-RUN;
 
 PROC SORT DATA = COMP_PCT;
 	BY ORD;
 RUN;
 
-PROC PRINT DATA = COMP_PCT;
-RUN;
 
 DATA COMP_FINAL;
 	SET COMP_PCT(RENAME = (STATUS = Reason)) COMP_WHY_PCT;
@@ -459,35 +419,9 @@ DATA COMP_FINAL;
 	LABEL PVAL = 'p-value[1]';
 RUN;
 
-PROC PRINT DATA = COMP_FINAL;
-RUN;
 
 
-/*REPORT*/
-PROC REPORT DATA = COMP_FINAL NOWINDOWS SPLIT = '|';
-	COLUMNS BLK ORD Reason Placebo Low High Total PVAL;
-	DEFINE BLK /ORDER NOPRINT;
-	DEFINE ORD /ORDER NOPRINT;
-	DEFINE Reason / DISPLAY ' ';
-	DEFINE Placebo / DISPLAY "Placebo (N=&N0)"	CENTER;
-	DEFINE Low / DISPLAY "Xanomeline Low Dose (N=&N54)" CENTER;
-	DEFINE High / DISPLAY "Xanomeline High Dose (N=&N81)" CENTER;
-	DEFINE Total / DISPLAY "Total (N=&N99)" CENTER;
-	DEFINE PVAL / DISPLAY "p-value[1]" CENTER;
-	
-	COMPUTE BEFORE BLK / STYLE = [JUST = L];
-		LENGTH HDR $60;
-		IF BLK = 1 THEN HDR = 'Completion Status';
-		ELSE IF BLK =2 THEN HDR = 'Reason for Early Termination (prior to Week 24)';
-		LINE HDR $60.;
-	ENDCOMP;
-	
-	COMPUTE AFTER BLK;
-		LINE ' ';
-	ENDCOMP;
-
-RUN;
-
+/*Output Table 14-1.02 to RTF*/
 OPTIONS NODATE NONUMBER ORIENTATION = LANDSCAPE;
 ODS ESCAPECHAR = '^';
 ODS RTF FILE = "&OUTPATH/t14_1_02.rtf" STYLE = JOURNAL;
@@ -512,7 +446,7 @@ PROC REPORT DATA = COMP_FINAL NOWINDOWS SPLIT = '|';
 	DEFINE Total   / DISPLAY "Total|(N=&N99)"                CENTER;
 	DEFINE PVAL    / DISPLAY "p-value[1]"                    CENTER;
 
-	/* 區塊標題列 */
+	/* block header rows */
 	COMPUTE BEFORE BLK / STYLE = [JUST = L];
 		LENGTH HDR $60;
 		IF BLK = 1 THEN HDR = 'Completion Status';
@@ -520,7 +454,7 @@ PROC REPORT DATA = COMP_FINAL NOWINDOWS SPLIT = '|';
 		LINE HDR $60.;
 	ENDCOMP;
 
-	/* 區塊之間空一行 */
+	/* blank line between blocks */
 	COMPUTE AFTER BLK;
 		LINE ' ';
 	ENDCOMP;
@@ -529,4 +463,3 @@ RUN;
 ODS RTF CLOSE;
 TITLE;
 FOOTNOTE;
-

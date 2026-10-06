@@ -1,36 +1,36 @@
+/*==========================================================================
+  Program   : t14_3_01.sas
+  Study     : CDISCPILOT01
+  Purpose   : Table 14-3.01 Primary Endpoint Analysis: ADAS Cog (11) -
+              Change from Baseline to Week 24 - LOCF (Efficacy population)
+              - Descriptive statistics for Baseline, Week 24 and change
+              - Dose response: ANCOVA, dose as a continuous variable
+              - Pairwise comparisons: ANCOVA, treatment as a class variable
+  Input     : ADAM.ADQSADAS_V1
+  Output    : PROC REPORT (RTF destination still to be added)
+  Spec      : SAP 10.1.1 and Template 5; define.xml ARM Table_14-3.01
+  Run after : setup.sas, adsl.sas, adqsadas.sas
+  QC status : Dose-response p-value (0.245) and the Low vs Placebo row are
+              verified against CSR Supporting Table 14-3.01; the other rows
+              are still to be confirmed (see docs/qc_summary.md).
+==========================================================================*/
+
 
 /*=====================================================================================
 					Table 14-3.01 Primary Endpoint Analysis: 
 			ADAS-Cog - Summary at Week 24 - LOCF (Efficacy Population)
 ======================================================================================*/
 
-/*==============================Basic Check==========================*/
-
-proc glm data = ADAM.ADQSADAS_V1;
-  where EFFFL='Y' and ANL01FL='Y' and AVISIT='Week 24' and PARAMCD="ACTOT";
-  class sitegr1;
-  model CHG = trtpn sitegr1;
-run;
-	
-proc glm data = ADAM.ADQSADAS_V1;
-  where EFFFL='Y' and ANL01FL='Y' and AVISIT='Week 24' and PARAMCD="ACTOT";
-  class trtpn sitegr1;
-  model CHG = trtpn sitegr1 base;
-  means trtpn;
-  lsmeans trtpn / OM STDERR PDIFF CL;
-run;
-/*================================================================*/
+/* Analysis subset: Efficacy population, window-selected (ANL01FL) Week 24 ACTOT
+   records, LOCF records included. PARAMCD = 'ACTOT' (define ARM has 'ATOT'). */
 DATA REPORT_ADAS_4;
 	SET ADAM.ADQSADAS_V1;
 	WHERE EFFFL='Y' and ANL01FL='Y' and AVISIT='Week 24' and PARAMCD="ACTOT";
 	KEEP TRTPN AVAL BASE CHG SITEGR1;
 RUN;
-/*=================================== FOR TOTAL MACRO ===========================*/
+/*================== Treatment-group N for the column headers ====================*/
 PROC FREQ DATA = REPORT_ADAS_4 NOPRINT;
 	TABLES TRTPN /LIST SPARSE MISSING OUT = TRTPN_FREQ (KEEP = TRTPN COUNT);
-RUN;
-
-PROC PRINT DATA = TRTPN_FREQ;
 RUN;
 
 DATA _NULL_;
@@ -44,7 +44,7 @@ RUN;
 %PUT &N0 &N54 &N81;
 /*================================================================================*/
 /*============================================================================
-							Block about Baseline
+		Descriptive statistics: Baseline (BASE), Week 24 (AVAL), Change (CHG)
 ==============================================================================*/
 
 %MACRO REPORT_SUMMARY(VAR = );
@@ -109,9 +109,6 @@ DATA &VAR._SUMMARY;
 	KEEP _VAR Placebo Low High;
 RUN;
 
-PROC PRINT DATA = &VAR._SUMMARY;
-RUN;
-
 %MEND REPORT_SUMMARY;
 
 %REPORT_SUMMARY(VAR = BASE);
@@ -119,6 +116,11 @@ RUN;
 %REPORT_SUMMARY(VAR = CHG);
 
 
+/*============================================================================
+	Dose response (define ARM R.1): TRTPN as a continuous variable.
+	BASE added per SAP 10.1.1 and CSR footnote [1] (the define program omits it);
+	verified against CSR Supporting Table 14-3.01: Type III p = 0.2447.
+==============================================================================*/
 ODS OUTPUT MODELANOVA = DR_ANOVA;
 PROC GLM DATA = REPORT_ADAS_4;
     CLASS SITEGR1;
@@ -126,10 +128,13 @@ PROC GLM DATA = REPORT_ADAS_4;
 RUN;
 QUIT;
 
-PROC PRINT DATA = DR_ANOVA;   /* 先確認欄位名稱 */
-RUN;
 
-
+/*============================================================================
+	Pairwise comparisons (define ARM R.2): TRTPN as a class variable.
+	ESTIMATE statements added because the table needs the SE of the LS-mean
+	difference, which LSMEANS / PDIFF does not provide. Coefficients follow the
+	class level order 0, 54, 81. Estimates, p-values and CIs equal LSMEANS PDIFF.
+==============================================================================*/
 ODS OUTPUT ESTIMATES = PW_EST;
 PROC GLM DATA = REPORT_ADAS_4;
     CLASS TRTPN SITEGR1;
@@ -140,9 +145,6 @@ PROC GLM DATA = REPORT_ADAS_4;
     LSMEANS TRTPN / OM STDERR PDIFF CL;
 RUN;
 QUIT;
-
-PROC PRINT DATA = PW_EST;
-RUN;
 
 DATA _NULL_;
     SET DR_ANOVA;
@@ -171,33 +173,15 @@ RUN;
 DATA STAT_SUMMARY;
     LENGTH _VAR $40 Placebo Low High $40;
 
-    CALL MISSING(Placebo, Low, High);
+    CALL MISSING(_VAR, Placebo, Low, High);      OUTPUT;   /* blank row */
     _VAR = 'P-value(Dose Response) [1][2]';      High = "&P_DR";                    OUTPUT;
 
-    CALL MISSING(Placebo, Low, High);
+    CALL MISSING(_VAR, Placebo, Low, High);      OUTPUT;   /* blank row */
     _VAR = 'P-value(Xan - Placebo) [1][3]';      Low = "&P_LP";  High = "&P_HP";    OUTPUT;
     _VAR = 'Diff. of LS Means (SE)';             Low = "&D_LP";  High = "&D_HP";    OUTPUT;
     _VAR = '95% CI';                             Low = "&CI_LP"; High = "&CI_HP";   OUTPUT;
 
-    CALL MISSING(Placebo, Low, High);
-    _VAR = 'P-value(Xan High - Xan Low) [1][3]'; High = "&P_HL";                    OUTPUT;
-    _VAR = 'Diff. of LS Means (SE)';             High = "&D_HL";                    OUTPUT;
-    _VAR = '95% CI';                             High = "&CI_HL";                   OUTPUT;
-RUN;
-
-
-DATA STAT_SUMMARY;
-    LENGTH _VAR $40 Placebo Low High $40;
-
-    CALL MISSING(_VAR, Placebo, Low, High);      OUTPUT;   /* 空白列 */
-    _VAR = 'P-value(Dose Response) [1][2]';      High = "&P_DR";                    OUTPUT;
-
-    CALL MISSING(_VAR, Placebo, Low, High);      OUTPUT;   /* 空白列 */
-    _VAR = 'P-value(Xan - Placebo) [1][3]';      Low = "&P_LP";  High = "&P_HP";    OUTPUT;
-    _VAR = 'Diff. of LS Means (SE)';             Low = "&D_LP";  High = "&D_HP";    OUTPUT;
-    _VAR = '95% CI';                             Low = "&CI_LP"; High = "&CI_HP";   OUTPUT;
-
-    CALL MISSING(_VAR, Placebo, Low, High);      OUTPUT;   /* 空白列 */
+    CALL MISSING(_VAR, Placebo, Low, High);      OUTPUT;   /* blank row */
     _VAR = 'P-value(Xan High - Xan Low) [1][3]'; High = "&P_HL";                    OUTPUT;
     _VAR = 'Diff. of LS Means (SE)';             High = "&D_HL";                    OUTPUT;
     _VAR = '95% CI';                             High = "&CI_HL";                   OUTPUT;
@@ -205,7 +189,7 @@ RUN;
 
 
 DATA BODY;
-    LENGTH _VAR $40 Placebo Low High $40;      /* 必須在 SET 之前，_VAR 原本只有 $14 */
+    LENGTH _VAR $40 Placebo Low High $40;      /* must precede SET: _VAR is $14 in the *_SUMMARY datasets */
     SET BASE_SUMMARY (IN = A)
         AVAL_SUMMARY (IN = B)
         CHG_SUMMARY
@@ -215,10 +199,10 @@ DATA BODY;
     ELSE IF B THEN BLK = 2;
     ELSE BLK = 3;
 
-    ORD   = _N_;     /* 依疊入的順序編號，排序時保持原順序 */
+    ORD   = _N_;     /* row sequence in stacking order */
     HDRFL = 0;
 
-    /* 縮排：一般列 4 格，Diff 和 CI 列 5 格 */
+    /* indentation: 4 spaces for statistic rows, 5 for Diff and CI rows */
     IF _VAR IN ('Diff. of LS Means (SE)', '95% CI') THEN _VAR = '     ' || _VAR;
     ELSE IF NOT MISSING(_VAR) THEN _VAR = '    ' || _VAR;
 RUN;
@@ -246,9 +230,10 @@ PROC SORT DATA = FINAL_ADAS;
     BY BLK ORD;
 RUN;
 
-PROC PRINT DATA = FINAL_ADAS;
-RUN;
-
+/*============================================================================
+		Display. TODO: ODS RTF destination and TITLE1-2 (protocol, page x of y)
+		as in t14_2_01.sas - see docs/review_notes.md
+==============================================================================*/
 TITLE3 'Table 14-3.01';
 TITLE4 'Primary Endpoint Analysis: ADAS Cog (11) - Change from Baseline to Week 24 - LOCF';
 
@@ -271,22 +256,3 @@ PROC REPORT DATA = FINAL_ADAS NOWD SPLIT = '|' STYLE(REPORT) = [OUTPUTWIDTH = 10
         IF HDRFL = 1 THEN CALL DEFINE(_ROW_, 'STYLE', 'STYLE=[FONT_WEIGHT=BOLD]');
     ENDCOMP;
 RUN;
-
-
-/*=====================================================================================
-					Table 14-3.02 Primary Endpoint Analysis: 
-				CIBIC+ - Summary at Week 24 - LOCF (Efficacy Population)
-======================================================================================*/
-
-/*==============================Basic Check==============================*/
-
-proc glm data = ADAM.ADQSCIBC_V1;
-  where EFFFL='Y' and ANL01FL='Y' and AVISIT='Week 24' and PARAMCD="CIBICVAL";
-  class sitegr1;
-  model AVAL = trtpn sitegr1;
-run;
-
-
-
-
-

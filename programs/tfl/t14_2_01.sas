@@ -1,3 +1,22 @@
+/*==========================================================================
+  Program   : t14_2_01.sas
+  Study     : CDISCPILOT01
+  Purpose   : Table 14-2.01 Summary of Demographic and Baseline
+              Characteristics (ITT population)
+              Continuous variables: n, mean, SD, median, min, max and
+              one-way ANOVA p-value; categorical variables: n (%) and
+              Pearson chi-square p-value.
+  Input     : ADAM.ADSL_V1
+  Output    : &OUTPATH/t14_2_01.rtf
+  Spec      : SAP Template 3; define.xml analysis results metadata
+  Run after : setup.sas, adsl.sas
+  Macros    : CREATE_CON_FREQ, CREATE_CAT_FREQ  - summary statistics
+              PEARSON_TEST, ANOVA_TEST          - p-values (global macro vars)
+              IMPUT_PVAL_CON, IMPUT_PVAL_CAT    - place p-values on the table
+  Notes     : Numeric display formats are an open item - see
+              docs/review_notes.md.
+==========================================================================*/
+
 
 /*=================================================================================================
 		Table 14-2.01 Summary of Demographic and Baseline Characteristics (ITT population)
@@ -82,7 +101,6 @@ DATA _&VAR._SUMMARY;
 	KEEP &VAR Placebo Low High Total ORD BLK;
 RUN;
 
-PROC PRINT DATA =_&VAR._SUMMARY; RUN;
 
 %MEND CREATE_CON_FREQ;
 /*=================================================================================*/
@@ -157,13 +175,75 @@ DATA _&VAR._SUMMARY;
 	KEEP &VAR Placebo Low High Total BLK;
 RUN;
 
-PROC PRINT DATA = _&VAR._SUMMARY;
-RUN;
 
 %MEND CREATE_CAT_FREQ;
 /*=================================================================================*/
 
 
+/*==========================================================================================
+                    Pearson Chi-square Test For Discrete Variables
+============================================================================================*/
+/*=================================================================================*/
+%MACRO PEARSON_TEST(DATA = , VAR = );
+
+ODS OUTPUT ChiSq = _&VAR._chisq;
+PROC FREQ DATA = &DATA;
+    WHERE TRT01PN IN (0, 54, 81);
+    TABLES &VAR * TRT01PN/CHISQ;
+RUN;
+
+DATA _NULL_;
+    SET _&VAR._chisq;
+    WHERE Statistic = 'Chi-Square';
+    CALL SYMPUTX("_&VAR._PVALUE",PUT(Prob, PVALUE5.3), 'G');
+RUN;
+
+%PUT &&_&VAR._PVALUE;
+
+%MEND PEARSON_TEST;
+/*=================================================================================*/
+
+/*=======================================================================================
+                        ANOVA Test For Continuous Variables
+=========================================================================================*/
+/*=================================================================================*/
+%MACRO ANOVA_TEST(DATA= ,VAR= );
+ODS OUTPUT OverallANOVA = _&VAR._ANOVA;
+PROC GLM DATA = &DATA;
+    WHERE TRT01PN IN (0, 54, 81);
+    CLASS TRT01PN;
+    MODEL &VAR = TRT01PN;
+RUN;
+QUIT;
+
+DATA _NULL_;
+    SET _&VAR._ANOVA;
+    WHERE Source = 'Model';
+    CALL SYMPUTX("_&VAR._PVALUE", PUT(ProbF, PVALUE5.3), 'G');
+RUN;
+
+%PUT &&_&VAR._PVALUE;
+%MEND ANOVA_TEST;
+/*=================================================================================*/
+/*===================================================================================
+                       Populate pvalue in Data
+====================================================================================*/
+%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= AGE, BLK = 1);
+%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= MMSETOT, BLK = 5);
+%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= DURDIS, BLK = 6);
+%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= EDUCLVL, BLK = 8);
+%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= WEIGHTBL, BLK = 9);
+%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= HEIGHTBL, BLK = 10);
+%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= BMIBL, BLK = 11);
+
+%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = AGEGR1, BLK = 2);
+%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = SEX, BLK = 3);
+%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = RACE, BLK = 4);
+%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = DURDSGR1, BLK = 7);
+%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = BMIBLGR1, BLK = 12);
+
+/* Category order and display labels (run after the CREATE_CAT_FREQ calls,
+   which create the _<VAR>_SUMMARY datasets used here) */
 DATA _AGEGR1_SUMMARY_REVISE;
 	SET _AGEGR1_SUMMARY;
 	IF AGEGR1 NOT IN ('n');
@@ -214,92 +294,6 @@ DATA _BMIBLGR1_SUMMARY_REVISE;
 	ELSE IF BMIBLGR1 = '>=30' THEN ORD = 3;
 RUN;
 
-
-/*==========================================================================================
-                    Pearson Chi-square Test For Discrete Variables
-============================================================================================*/
-/*AGE */
-%LET DATA = REPORT_CAT_3;
-%LET VAR = AGEGR1;
-
-ODS TRACE ON;
-PROC FREQ DATA = &DATA NOPRINT;
-    WHERE TRT01PN IN (0, 54, 81);
-    TABLES &VAR * TRT01PN/CHISQ;
-RUN;
-ODS TRACE OFF;
-/*=================================================================================*/
-%MACRO PEARSON_TEST(DATA = , VAR = );
-
-ODS OUTPUT ChiSq = _&VAR._chisq;
-PROC FREQ DATA = &DATA;
-    WHERE TRT01PN IN (0, 54, 81);
-    TABLES &VAR * TRT01PN/CHISQ;
-RUN;
-
-DATA _NULL_;
-    SET _&VAR._chisq;
-    WHERE Statistic = 'Chi-Square';
-    CALL SYMPUTX("_&VAR._PVALUE",PUT(Prob, PVALUE5.3), 'G');
-RUN;
-
-%PUT &&_&VAR._PVALUE;
-
-%MEND PEARSON_TEST;
-/*=================================================================================*/
-%PEARSON_TEST(DATA = REPORT_CAT_3, VAR= AGEGR1);
-%PEARSON_TEST(DATA = REPORT_CAT_3, VAR= SEX);
-%PEARSON_TEST(DATA = REPORT_CAT_3, VAR= RACE);
-%PEARSON_TEST(DATA = REPORT_CAT_3, VAR= DURDSGR1);
-%PEARSON_TEST(DATA = REPORT_CAT_3, VAR= BMIBLGR1);
-
-/*=======================================================================================
-                        ANOVA Test For Continuous Variables
-=========================================================================================*/
-ODS TRACE ON;
-PROC GLM DATA = REPORT_CON_3 NOPRINT;
-    WHERE TRT01PN IN (0, 54, 81);
-    CLASS TRT01PN;
-    MODEL AGE = TRT01PN;
-RUN;
-QUIT;
-ODS TRACE OFF;
-/*=================================================================================*/
-%MACRO ANOVA_TEST(DATA= ,VAR= );
-ODS OUTPUT OverallANOVA = _&VAR._ANOVA;
-PROC GLM DATA = &DATA;
-    WHERE TRT01PN IN (0, 54, 81);
-    CLASS TRT01PN;
-    MODEL &VAR = TRT01PN;
-RUN;
-QUIT;
-
-DATA _NULL_;
-    SET _&VAR._ANOVA;
-    WHERE Source = 'Model';
-    CALL SYMPUTX("_&VAR._PVALUE", PUT(ProbF, PVALUE5.3), 'G');
-RUN;
-
-%PUT &&_&VAR._PVALUE;
-%MEND ANOVA_TEST;
-/*=================================================================================*/
-/*===================================================================================
-                       Populate pvalue in Data
-====================================================================================*/
-%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= AGE, BLK = 1);
-%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= MMSETOT, BLK = 5);
-%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= DURDIS, BLK = 6);
-%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= EDUCLVL, BLK = 8);
-%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= WEIGHTBL, BLK = 9);
-%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= HEIGHTBL, BLK = 10);
-%CREATE_CON_FREQ(DATA=REPORT_CON_3, VAR= BMIBL, BLK = 11);
-
-%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = AGEGR1, BLK = 2);
-%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = SEX, BLK = 3);
-%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = RACE, BLK = 4);
-%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = DURDSGR1, BLK = 7);
-%CREATE_CAT_FREQ(DATA = REPORT_CAT_3, VAR = BMIBLGR1, BLK = 12);
-
 %PEARSON_TEST(DATA = REPORT_CAT_3, VAR= AGEGR1);
 %PEARSON_TEST(DATA = REPORT_CAT_3, VAR= SEX);
 %PEARSON_TEST(DATA = REPORT_CAT_3, VAR= RACE);
@@ -325,16 +319,8 @@ DATA &VAR._SUMMARY_FINAL;
 	SET _&VAR._SUMMARY;
 	IF ORD = 2 THEN PVALUE = &&_&VAR._PVALUE;
 RUN;
-PROC PRINT DATA = &VAR._SUMMARY_FINAL;RUN;
 %MEND IMPUT_PVAL_CON;
 /*=================================================================================*/
-%IMPUT_PVAL_CON(VAR= AGE);
-%IMPUT_PVAL_CON(VAR= MMSETOT);
-%IMPUT_PVAL_CON(VAR= DURDIS);
-%IMPUT_PVAL_CON(VAR= EDUCLVL);
-%IMPUT_PVAL_CON(VAR= WEIGHTBL);
-%IMPUT_PVAL_CON(VAR= HEIGHTBL);
-%IMPUT_PVAL_CON(VAR= BMIBL);
 
 /*=================================================================================*/
 %MACRO IMPUT_PVAL_CAT(VAR=);
@@ -342,7 +328,6 @@ DATA &VAR._SUMMARY_FINAL;
 	SET _&VAR._SUMMARY_REVISE;
 	IF ORD = 1  THEN PVALUE = &&_&VAR._PVALUE;
 RUN;
-PROC PRINT DATA = &VAR._SUMMARY_FINAL;RUN;
 %MEND IMPUT_PVAL_CAT;
 /*=================================================================================*/
 %IMPUT_PVAL_CON(VAR= AGE);
@@ -398,35 +383,10 @@ ELSE IF BLK IN (11, 12) THEN DO; PARAMN = 9; PARAM = 'Baseline BMI (kg/m2)'; END
 
 RUN;
 
-PROC PRINT DATA = DEMO_REPORT;
-RUN;
 
 
 /*==================================================================================
-								Create Table
-====================================================================================*/
-
-PROC REPORT DATA = DEMO_REPORT NOWINDOWS SPLIT = '|';
-    COLUMNS PARAMN PARAM BLK ORD _VAR Placebo Low High Total PVALUE;
-    DEFINE PARAMN  / ORDER NOPRINT;
-    DEFINE PARAM   / ORDER ' ' LEFT;
-    DEFINE BLK     / ORDER NOPRINT;
-    DEFINE ORD     / ORDER NOPRINT;
-    DEFINE _VAR    / DISPLAY ' ' LEFT;
-    DEFINE Placebo / DISPLAY "Placebo|(N=&N0)" CENTER;
-    DEFINE Low     / DISPLAY "Xanomeline|Low Dose|(N=&N54)" CENTER;
-    DEFINE High    / DISPLAY "Xanomeline|High Dose|(N=&N81)" CENTER;
-    DEFINE Total   / DISPLAY "Total|(N=&N99)" CENTER;
-    DEFINE PVALUE  / DISPLAY "p-value [1]" FORMAT=PVALUE5.3 CENTER;
-
-    COMPUTE AFTER BLK;
-        LINE ' ';
-    ENDCOMP;
-RUN;
-
-
-/*==================================================================================
-						 FINISH TABLE 03		
+						Output Table 14-2.01 to RTF
 ====================================================================================*/
 ODS ESCAPECHAR = '^';
 OPTIONS NODATE NONUMBER ORIENTATION = LANDSCAPE MISSING = ' ';
@@ -462,9 +422,3 @@ RUN;
 
 ODS RTF CLOSE;
 TITLE; FOOTNOTE;
-
-
-
-
-
-
