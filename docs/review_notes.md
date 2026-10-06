@@ -52,7 +52,7 @@ Expected result of a clean `run_all.sas` run: the same ADaM datasets and PROC CO
 
 ## Not included in this repository
 
-The SDTM mapping programs (AE, DM, DS, EC, VS from the pharmaverse raw data) belong to a different study and are still in progress. Items noted while reading them:
+The raw-to-SDTM mapping programs (AE, DM, DS, EC, VS) are the first step of the same pipeline: they map the pharmaverse raw datasets, which are built from pharmaversesdtm, whose core domains come from the CDISC pilot project (the same subjects, e.g. 701-1015). They are still in progress and are not yet connected to the ADaM programs, which read the CDISC SDTM transport files. Items noted while reading them:
 
 - AE: `AESCAN = PUT(AEACN, $NY.)` reads AEACN instead of AESCAN; `'Not Submmitted'` typo in the AESDTH format.
 - DM: `'NOT HISPANIC OR LATIO'` typo in the ETHNIC format; USUBJID is taken from PATNUM without the study and site prefix.
