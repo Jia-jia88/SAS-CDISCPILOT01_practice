@@ -1,0 +1,244 @@
+OPTION NOLABEL;
+
+libname vsin  xport "/home/u63793342/sasuser.v94/vs_raw.xpt";
+
+data vs_raw;
+ set vsin.vs_raw; 
+run;
+
+PROC IMPORT  DATAFILE ="/home/u63793342/sasuser.v94/SDTMIG_v3.4.xlsx" DBMS=XLSX OUT = sdtm_var;
+SHEET = "Variables";
+RUN;
+
+DATA sdtm_vs_var;
+	SET sdtm_var (WHERE = ('Dataset Name'n ="VS"));
+RUN;
+
+PROC PRINT DATA = vs_raw (OBS = 20);
+RUN;
+
+/*Step 1 Remove IT prefix*/
+
+PROC SQL;
+SELECT 
+TRIM(name)||"="||TRIM(SUBSTR(name,4)) as removeprefix
+INTO :removeprefix SEPARATED BY " "
+FROM Dictionary.columns
+WHERE libname = "WORK"
+AND memname = "VS_RAW"
+AND SUBSTR(name, 1, 3) = "IT_"
+;
+QUIT;
+
+%PUT &removeprefix;
+
+DATA vs_col_remove_IT;
+	SET vs_raw;
+	RENAME &removeprefix;
+RUN;
+
+PROC PRINT DATA = vs_col_remove_IT (OBS=20);
+RUN;
+
+/*Step 2 Rename by aCRF*/
+DATA vs_rename;
+	SET vs_col_remove_IT;
+	DROP FORML;
+	RENAME 
+	STUDY = STUDYID
+	PATNUM = USUBJID
+	FORM = DOMAIN
+	VTLD = VSDTC
+	HEIGH = HEIGHT_VSORRES
+	WEIGH = WEIGHT
+	TEMP_ = TEMP_LOC
+	TMPTC = VSTPT
+	;
+RUN;
+
+PROC PRINT DATA = vs_rename(OBS = 20);
+RUN;
+
+PROC FREQ DATA = vs_rename;
+	 TABLES HEIGHT_VSORRES WEIGHT TEMP TEMP_LOC SYS_BP DIA_BP PULSE SUBPOS/MISSING;
+RUN;
+
+
+/*Step 3 Create new table vs_HEIGHT*/
+
+DATA vs_HEIGHT;
+	SET vs_rename;
+	WHERE NOT MISSING(HEIGHT_VSORRES);
+	VSTEST = "Height";
+	VSTESTCD = "HEIGHT";
+	VSORRES  = HEIGHT_VSORRES;
+	VSORRESU = "IN";
+	KEEP STUDYID USUBJID DOMAIN INSTANCE VSTESTCD VSTEST VSORRES VSORRESU VSDTC VSTPT;
+RUN;
+
+
+
+/*Step 4 Create new table vs_WEIGHT*/
+DATA vs_WEIGHT;
+	SET vs_rename;
+	WHERE NOT MISSING(WEIGHT);
+	VSTEST = "Weight";
+	VSTESTCD = "WEIGHT";
+	VSORRES  = WEIGHT;
+	VSORRESU = "LB";
+	KEEP STUDYID USUBJID DOMAIN INSTANCE VSTESTCD VSTEST VSORRES VSORRESU VSDTC VSTPT;
+RUN;
+
+
+
+/*Step 5 Create new table vs_TEMP*/
+
+DATA vs_TEMP;
+	SET vs_rename;
+	WHERE NOT MISSING(TEMP);
+	VSTEST = "Temperature";
+	VSTESTCD = "TEMP";
+	VSORRES  = TEMP;
+	VSORRESU = "F";
+	VSLOC = TEMP_LOC;
+	KEEP STUDYID USUBJID DOMAIN INSTANCE VSTESTCD VSTEST VSORRES VSORRESU VSLOC VSDTC VSTPT;
+RUN;
+
+
+
+
+/*Step 6 Create new table vs_SYSBP*/
+
+DATA vs_SYSBP;
+	SET vs_rename;
+	WHERE NOT MISSING(SYS_BP);
+	VSTEST = "Systolic Blood Pressure";
+	VSTESTCD = "SYSBP";
+	VSORRES  = SYS_BP;
+	VSORRESU = "mmHg";
+	VSPOS = SUBPOS;
+	KEEP STUDYID USUBJID DOMAIN INSTANCE VSTESTCD VSTEST VSPOS VSORRES VSORRESU VSDTC VSTPT;
+RUN;
+
+PROC FREQ DATA = vs_SYSBP;
+	TABLES VSORRES;
+RUN;
+
+
+
+/*Step 7 Create new table vs_DIABP*/
+
+DATA vs_DIABP;
+	SET vs_rename;
+	WHERE NOT MISSING(DIA_BP);
+	VSTEST = "Diastolic Blood Pressure";
+	VSTESTCD = "DIABP";
+	VSORRES  = DIA_BP;
+	VSORRESU = "mmHg";
+	VSPOS = SUBPOS;
+	KEEP STUDYID USUBJID DOMAIN INSTANCE VSTESTCD VSTEST VSPOS VSORRES VSORRESU VSDTC VSTPT;
+RUN;
+
+PROC PRINT DATA = vs_DIABP;
+RUN;
+
+/*Step 8 Create new table vs_PULSE*/
+
+DATA vs_PULSE;
+	SET vs_rename;
+	WHERE NOT MISSING(PULSE);
+	VSTEST = "Pulse Rate";
+	VSTESTCD = "PULSE";
+	VSORRES  = PULSE;
+	VSORRESU = "BEATS/MIN";
+	VSPOS = SUBPOS;
+	KEEP STUDYID USUBJID DOMAIN INSTANCE VSTESTCD VSTEST VSPOS VSORRES VSORRESU VSDTC VSTPT;
+RUN;
+
+PROC PRINT DATA = vs_PULSE;
+RUN;
+
+
+/*Step 9 Create new table vs_conbine*/
+
+PROC SQL;
+SELECT 
+name, length
+FROM Dictionary.columns
+WHERE libname = "WORK"
+AND memname IN("VS_HEIGHT" ,"VS_WEIGHT", "VS_TEMP" ,"VS_SYSBP" ,"VS_DIABP" ,"VS_PULSE")
+AND name IN ("VSTEST", "VSORRESU")
+;
+QUIT;
+
+
+DATA vs_combine;
+	RETAIN STUDYID USUBJID DOMAIN INSTANCE 
+           VSTESTCD VSTEST VSORRES VSORRESU 
+           VSPOS VSLOC VSDTC VSTPT;
+	LENGTH VSTEST $24.;
+	LENGTH VSORRESU $9.;
+	SET vs_HEIGHT vs_WEIGHT vs_TEMP vs_SYSBP vs_DIABP vs_PULSE;
+	VSDTC = PUT(INPUT(VSDTC,DATE11.),YYMMDD10.);
+RUN;
+
+
+/*Step 10 Check outliers*/
+
+DATA vs_outliers_check;
+	SET vs_combine;
+	VSORRES_num = INPUT(VSORRES, best.);
+	IF VSTESTCD = "WEIGHT" AND (VSORRES_num < 70 OR VSORRES_num > 350) THEN OUTLIER_CHECK = "Y";
+	ELSE IF VSTESTCD = "HEIGHT" AND (VSORRES_num < 50 OR VSORRES_num > 80) THEN OUTLIER_CHECK = "Y";
+	ELSE IF VSTESTCD = "TEMP" AND (VSORRES_num < 90 OR VSORRES_num > 105) THEN OUTLIER_CHECK = "Y";
+	;
+RUN;
+
+PROC PRINT DATA = vs_outliers_check;
+	WHERE OUTLIER_CHECK = "Y";
+RUN;
+
+DATA vs_unit_change;
+	SET vs_outliers_check;
+	WHERE OUTLIER_CHECK = "Y";
+	LENGTH VSORRES_METRIC 8;
+    IF VSTESTCD = "WEIGHT" THEN VSORRES_METRIC = VSORRES_num*2.20462;   
+    ELSE IF VSTESTCD = "HEIGHT" THEN VSORRES_METRIC = VSORRES_num / 2.54; 
+    ELSE IF VSTESTCD = "TEMP" THEN VSORRES_METRIC = VSORRES_num* 9/5 + 32;
+RUN;
+
+PROC PRINT DATA = vs_unit_change;
+
+RUN;
+
+
+DATA vs_cross;
+	SET vs_combine;
+RUN;
+
+
+/*練習*/
+
+/* 先建立一個對照表,列出哪些記錄要改成什麼值 */
+DATA correction_list;
+    INPUT USUBJID $ VSTESTCD $ VSDTC :$10. NEW_VALUE;
+    DATALINES;
+701-1015 HEIGHT 2013-01-06 148
+701-1023 WEIGHT 2014-07-29 55.5
+;
+RUN;
+
+/* 合併回主資料集,依照對照表更新對應記錄 */
+PROC SORT DATA = vs_combine; 
+	BY USUBJID VSTESTCD VSDTC;
+RUN;
+PROC SORT DATA = correction_list;
+	BY USUBJID VSTESTCD VSDTC;
+RUN;
+
+DATA vs_combine_updated;
+    MERGE vs_combine correction_list(IN=in_correction);
+    BY USUBJID VSTESTCD VSDTC;
+    IF in_correction THEN VSORRES = PUT(NEW_VALUE, BEST.);
+RUN;
+

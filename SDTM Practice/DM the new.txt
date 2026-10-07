@@ -1,0 +1,166 @@
+
+/* import the sdtm standard data */
+OPTION NOLABEL;
+
+PROC IMPORT  DATAFILE ="/home/u63793342/sasuser.v94/SDTMIG_v3.4.xlsx" DBMS=XLSX OUT = sdtm_var;
+SHEET = "Variables";
+RUN;
+DATA sdtm_dm_var;
+	SET sdtm_var (WHERE = ('Dataset Name'n ="DM"));
+RUN;
+
+
+/* import the DM data  */
+PROC IMPORT  DATAFILE ="/home/u63793342/sasuser.v94/dm_raw.csv" DBMS=CSV OUT = dm_raw REPLACE;
+RUN;
+
+
+
+/* STEP 1 IT prefix removal */
+PROC SQL;
+SELECT 
+	SUBSTR(name,4)as stdlist,
+	name as ITlist,
+	TRIM(name)||"="||SUBSTR(name,4) as marcolist
+FROM Dictionary.columns
+WHERE libname = "WORK"
+AND memname = "DM_RAW"
+AND SUBSTR(name,1,3) = "IT."
+;
+QUIT;
+
+PROC SQL;
+SELECT
+	"'"||TRIM(name)||"'n="||SUBSTR(name,4) as marcolist
+	INTO :marcoprefix SEPARATED BY' '
+FROM Dictionary.columns
+WHERE libname = "WORK"
+AND memname = "DM_RAW"
+AND SUBSTR(name,1,3) = "IT.";
+QUIT;
+
+%PUT &marcoprefix;
+
+DATA dm_col_prefix_remove;
+	SET dm_raw; 
+	RENAME &marcoprefix;
+RUN;
+
+
+/* STEP 2 Rename to Standard*/
+
+DATA dm_col_std_name;
+	SET dm_col_prefix_remove;
+	RENAME
+	STUDY = STUDYID
+	PATNUM = USUBJID
+	PLANNED_ARM = ARM
+	PLANNED_ARMCD = ARMCD
+	ACTUAL_ARM = ACTARM
+	ACTUAL_ARMCD = ACTARMCD
+	COL_DT = DMDTC
+	IC_DT = RFICDTC;
+	
+	DOMAIN = 'DM';
+RUN;
+
+/* STEP 3 Order to Standard*/
+
+PROC SQL;
+CREATE TABLE orderlist_dm AS 
+SELECT sdtm.'Variable Name'n, INPUT(sdtm.'Variable Order'n, 2.) AS order_num, r.name, r.varnum
+FROM sdtm_dm_var as sdtm
+	INNER JOIN (SELECT
+	name, varnum
+	FROM Dictionary.columns 
+	WHERE libname = "WORK"
+	AND memname = "DM_COL_STD_NAME") as r
+ON r.name = sdtm.'Variable Name'n
+ORDER BY order_num
+;
+QUIT;
+
+PROC SQL;
+SELECT 'Variable Name'n
+INTO :orderlist_dm SEPARATED BY ' '
+FROM orderlist_dm
+;
+QUIT;
+
+%PUT &orderlist_dm;
+
+DATA dm_col_std_order;
+	RETAIN &orderlist_dm;
+	SET dm_col_std_name;
+RUN;
+
+PROC PRINT DATA = dm_col_std_order;
+RUN;
+
+/* STEP 4 Check Req.*/
+PROC SQL;
+SELECT s.'Variable Name'n
+INTO :reqlist SEPARATED BY ' '
+FROM sdtm_dm_var as s
+INNER JOIN(SELECT r.name
+	FROM Dictionary.columns as r
+	WHERE libname = "WORK"
+	AND memname = "DM_COL_STD_ORDER"
+)
+ON r.name = s.'Variable Name'n
+WHERE Core = 'Req'
+;
+QUIT;
+
+%PUT &reqlist;
+
+DATA dm_col_std_req;
+	SET dm_col_std_order;
+	ARRAY req[*] &reqlist;
+	DO i = 1 to dim(req);
+		IF MISSING(req[i]) THEN DO;
+			missing_var = VNAME(req[i]);
+			OUTPUT;
+			END;
+	END;
+RUN;
+
+/* STEP 5 Revise value to standard*/
+PROC FREQ DATA=dm_col_std_order;
+    TABLES SEX RACE ETHNIC ARMCD ARM ACTARMCD ACTARM COUNTRY/ MISSING;
+RUN;
+
+PROC FORMAT;
+VALUE $sex 'Female' = 'F' 'Male'='M';
+VALUE $racec 'White' = 'WHITE' 'Asian' = 'ASIAN' 'Black or African American' = 'BLACK OR AFRICAN AMERICAN'
+'American Indian or Alaska Native'='AMERICAN INDIAN OR ALASKA NATIVE';
+VALUE $ethnic 'Hispanic or Latino'='HISPANIC OR LATINO' 'Not Hispanic or Latino'='NOT HISPANIC OR LATIO';
+RUN;
+
+
+DATA dm_value_std;
+    SET dm_col_std_order;
+    IF NOT (UPCASE(STRIP(RFICDTC)) = "NA") THEN DO;
+    	RFICDTC = PUT(INPUT(RFICDTC, MMDDYY10.),YYMMDD10.);
+    END;
+    ELSE RFICDTC = "NA";
+    DMDTC = PUT(INPUT(DMDTC,MMDDYY10.),YYMMDD10.);
+    SEX = PUT(SEX, $sex.);
+    RACE = PUT(RACE, $racec.);
+    ETHNIC = PUT(ETHNIC, $ethnic.);
+RUN;
+
+DATA dm_value_std;
+	RETAIN &orderlist_dm;
+    SET dm_value_std;
+RUN;
+
+
+/*STEP 9 Cross DOMAIN */
+DATA dm_cross;
+	SET dm_value_std;
+RUN;
+
+PROC PRINT DATA = dm_cross;
+RUN;
+

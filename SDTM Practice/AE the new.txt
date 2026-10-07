@@ -1,0 +1,206 @@
+OPTION NOLABEL;
+
+PROC IMPORT  DATAFILE ="/home/u63793342/sasuser.v94/SDTMIG_v3.4.xlsx" DBMS=XLSX OUT = sdtm_var;
+SHEET = "Variables";
+RUN;
+
+
+DATA sdtm_ae_var;
+	SET sdtm_var (WHERE = ('Dataset Name'n ="AE"));
+RUN;
+
+libname aein  xport "/home/u63793342/sasuser.v94/ae_raw.xpt";
+
+data ae_raw;
+ set aein.ae_raw; 
+run;
+
+/*STEP 1 IT_ prefix removal*/
+OPTIONS NOLABEL;
+
+PROC SQL;
+	SELECT
+		TRIM(name)||"="||SUBSTR(name,4) AS rename
+		INTO :renamelist SEPARATED BY ' '
+	FROM Dictionary.columns
+	WHERE libname = "WORK"
+	AND memname = "AE_RAW"
+	AND SUBSTR(name,1,3) = "IT_";
+	;
+QUIT;
+
+%PUT &renamelist;
+
+DATA ae_col_revise_IT;
+	SET AE_RAW;
+	RENAME &renamelist;
+RUN;
+
+/*STEP 2 Revise Column Name to Standard*/
+
+PROC SQL;
+SELECT name
+FROM Dictionary.columns
+WHERE libname = "WORK"
+AND memname = "AE_COL_REVISE_IT"
+EXCEPT
+SELECT 'Variable Name'n
+FROM sdtm_ae_var;
+QUIT;
+
+DATA ae_col_revise_name; 
+	SET ae_col_revise_IT;
+	DROP FOLDERL;
+	RENAME
+	AEDIS = AESDISAB
+	AEEND = AEENDTC
+	AEOUTCOM = AEOUT
+	AESCNO = AESCONG
+	AESDT = AESDTH
+	AESHO = AESHOSP
+	AESLI = AESLIFE
+	AESTD = AESTDTC
+	AETER = AETERM
+	FOLDER = DOMAIN
+	PATNUM = USUBJID
+	STUDY = STUDYID
+	AEDTCOL = AEDTC
+	;
+RUN;
+
+/*STEP 3 Column to Standard Order*/
+
+PROC SQL;
+CREATE TABLE orderlist as
+    SELECT sdtm.'Variable Name'n, sdtm.'Variable Order'n, r.varnum,INPUT(sdtm.'Variable Order'n, 2.) AS order_num
+    FROM SDTM_AE_VAR AS sdtm
+    INNER JOIN 
+        (SELECT name, varnum
+         FROM Dictionary.columns
+         WHERE libname="WORK" AND memname="AE_COL_REVISE_NAME") AS r
+    ON sdtm.'Variable Name'n = r.name
+    ORDER BY r.varnum;
+QUIT;
+
+PROC SORT DATA = orderlist ;
+	BY order_num;
+RUN;
+
+PROC SQL;
+    SELECT 'Variable Name'n
+    INTO :varorder SEPARATED BY ' '
+    FROM orderlist
+    ORDER BY order_num;
+QUIT;
+
+%PUT &varorder;
+
+DATA ae_sdtm_ordered;
+    RETAIN &varorder;
+    SET ae_col_revise_name;
+RUN;
+
+/*STEP 4 Check Req. missing values*/
+
+
+PROC SQL; 
+CREATE TABLE core_check AS 
+	SELECT m.name, m.varnum, std.'Variable Name'n, std.Core
+	FROM sdtm_ae_var as std
+	INNER JOIN
+		(SELECT name, varnum
+		FROM Dictionary.columns
+		WHERE libname = "WORK"
+		AND memname = "AE_SDTM_ORDERED") as m
+	ON m.name = std.'Variable Name'n
+	ORDER BY m.varnum;
+QUIT;
+
+
+PROC SQL;
+SELECT
+ name
+INTO :req_var SEPARATED BY' '
+FROM core_check
+WHERE Core = 'Req';
+quit;
+
+%PUT &req_var;
+
+DATA ae_sdtm_req_chk;
+	SET ae_sdtm_ordered;
+	ARRAY req[*] &req_var;
+	DO i = 1 to dim(req);
+		IF MISSING(req[i]) THEN DO;
+			missing_var = VNAME(req[i]);
+			OUTPUT;
+		END;
+	END;
+RUN;
+/*如果沒有印出表示目前目前req_chk沒有Missing*/
+PROC PRINT DATA = ae_sdtm_req_chk;
+RUN;
+
+/*STEP 6 Revise value to CT and */
+
+
+
+PROC FORMAT ;
+	VALUE $NY 'No' = 'N' 'Yes' = 'Y';
+	VALUE $SEVERITY 'Mild Adverse Event'='MILD' 'Moderate Adverse Event'='MODERATE' 'Severe Adverse Event'='SEVERE';
+	VALUE $NYAESDTH 'Yes' = 'Y' 'No'='Not Submmitted';
+RUN;
+
+DATA ae_sdtm_CT;
+	RETAIN &varorder;
+	LENGTH AESDTH $14.;
+	SET ae_sdtm_ordered;
+	AESEV = PUT(AESEV, $SEVERITY.);
+	AESER = PUT(AESER, $NY.);
+	AEACN = PUT(AEACN, $NY.);
+	AESCAN = PUT(AEACN, $NY.);
+	AESCONG = PUT(AESCONG, $NY.);
+	AESDISAB = PUT(AESDISAB, $NY.);
+	AESDTH = PUT(AESDTH, $NYAESDTH.);
+	AESHOSP = PUT(AESHOSP, $NY.);
+	AESLIFE = PUT(AESLIFE, $NY.);
+	AESOD = PUT(AESOD, $NY.);
+	AEOUT = UPCASE(AEOUT);
+RUN;
+
+/*STEP 7 Revise time value to ISO 8601 */
+
+DATA ae_sdtm_time;
+	SET ae_sdtm_CT;
+	AESTDTC= PUT(INPUT(AESTDTC,MMDDYY10.),YYMMDD10.);
+	AEENDTC = PUT(INPUT(AEENDTC,MMDDYY10.),YYMMDD10.);
+	AEDTC = PUT(INPUT(AEDTC,MMDDYY10.),YYMMDD10.);
+RUN;
+
+PROC PRINT DATA = ae_sdtm_time;
+RUN;
+
+
+/*STEP 8 Add AESEQ*/
+/*若AESTDTC為MISSING AESEQ = 1，由於資料沒有AESPID所以使用 STUDYID USUBJID AESTDTC AEDECOD的排序*/
+
+PROC SORT DATA = ae_sdtm_time;
+	BY STUDYID USUBJID AESTDTC AEDECOD;
+RUN;
+
+DATA ae_sdtm_seq;
+	SET ae_sdtm_time;
+	BY STUDYID USUBJID;
+	IF FIRST.USUBJID = 1 THEN AESEQ = 0;
+	AESEQ +1;
+RUN;
+
+
+/*STEP 9 Cross DOMAIN */
+DATA ae_cross;
+	SET ae_sdtm_seq;
+RUN;
+
+
+
+

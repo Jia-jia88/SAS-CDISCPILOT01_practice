@@ -1,0 +1,115 @@
+OPTION NOLABEL;
+
+libname ecin  xport "/home/u63793342/sasuser.v94/ec_raw.xpt";
+
+data ec_raw;
+ set ecin.ec_raw; 
+run;
+
+PROC IMPORT  DATAFILE ="/home/u63793342/sasuser.v94/SDTMIG_v3.4.xlsx" DBMS=XLSX OUT = sdtm_var;
+SHEET = "Variables";
+RUN;
+
+DATA sdtm_ec_var;
+	SET sdtm_var (WHERE = ('Dataset Name'n ="EC"));
+RUN;
+
+/*Step 1 Remove IT prefix*/
+PROC SQL;
+SELECT 
+TRIM(name)||"="||TRIM(SUBSTR(name,4)) as removeprefix
+INTO :removeprefix SEPARATED BY ' '
+FROM Dictionary.columns
+WHERE libname = "WORK"
+AND memname = "EC_RAW"
+AND SUBSTR(name, 1, 3) = "IT_"
+;
+QUIT;
+
+%PUT &removeprefix;
+
+DATA ec_remove_IT;
+	SET ec_raw;
+	RENAME &removeprefix;
+RUN;
+
+PROC PRINT DATA = ec_remove_IT;
+RUN;
+
+/*Step 2 Rename */
+DATA ec_rename_for_truc;
+	SET ec_remove_IT;
+	RENAME
+	STUDY = STUDYID
+	PATNUM = USUBJID
+	FOLDER = DOMAIN
+	ECREF = ECREFID
+	ECSTD = ECSTDAT
+	ECEND = ECENDAT
+	ECDST = ECDSTXT
+	ECDOS = ECDOSU
+	ECROU = ECROUTE
+	VISITNAM = VISIT
+	;
+RUN;
+
+
+DATA ec_rename;
+	SET ec_rename_for_truc;
+	DROP FOLDERL;
+	RENAME 
+	DRUGAD = ECTRT
+	ECSTDAT = ECSTDTC
+	ECENDAT = ECENDTC
+	ECDSTXT = ECDOSE
+	DOSFM = ECDOSFRM
+	DOSFRQ = ECDOSFRQ
+	;
+RUN;
+
+PROC PRINT DATA = ec_rename;
+RUN;
+
+/*Step 3 */
+
+DATA ec_rename_time;
+	SET ec_rename;
+	ECSTDTC = PUT(INPUT(ECSTDTC, DATE11.),YYMMDD10.);
+	ECENDTC = PUT(INPUT(ECENDTC, DATE11.),YYMMDD10.);	
+RUN;
+
+PROC PRINT DATA = ec_rename_time;
+RUN;
+
+DATA ec_cross;
+	SET ec_rename_time;
+RUN;
+
+
+PROC SQL;
+    SELECT name
+    FROM Dictionary.columns
+    WHERE libname="WORK" AND memname="EC_RENAME"
+    EXCEPT
+    SELECT "Variable Name"n
+    FROM sdtm_ec_var
+    ;
+QUIT;
+
+
+PROC SQL;
+SELECT s."Variable Name"n, s."Variable Order"n, r.name, r.varnum
+FROM sdtm_ec_var as s
+INNER JOIN (
+SELECT name, varnum
+FROM Dictionary.columns
+WHERE libname = "WORK"
+AND memname = "EC_RENAME"
+) as r
+ON r.name = s."Variable Name"n
+ORDER BY s."Variable Order"n
+;
+QUIT;
+
+
+
