@@ -1,0 +1,859 @@
+
+libname dmsdtm xport "/home/u63793342/sasuser.v94/dm.xpt";
+libname dssdtm xport "/home/u63793342/sasuser.v94/ds.xpt";
+libname exsdtm xport "/home/u63793342/sasuser.v94/ex.xpt";
+libname svsdtm xport "/home/u63793342/sasuser.v94/sv.xpt";
+libname vssdtm xport "/home/u63793342/sasuser.v94/vs.xpt";
+libname scsdtm xport "/home/u63793342/sasuser.v94/sc.xpt";
+libname mhsdtm xport "/home/u63793342/sasuser.v94/mh.xpt";
+libname qssdtm xport "/home/u63793342/sasuser.v94/qs.xpt";
+
+data dm_sdtm;
+	set dmsdtm.dm; 
+run;
+data ds_sdtm;
+	set dssdtm.ds; 
+run;
+data ex_sdtm;
+	set exsdtm.ex; 
+run;
+data sv_sdtm;
+	set svsdtm.sv; 
+run;
+data vs_sdtm;
+	set vssdtm.vs; 
+run;
+data sc_sdtm;
+	set scsdtm.sc; 
+run;
+data mh_sdtm;
+	set mhsdtm.mh; 
+run;
+data qs_sdtm;
+	set qssdtm.qs; 
+run;
+
+
+/*==============================================================================================
+									Derivation Chain 1
+================================================================================================*/
+/*Step 1 Derive varaibles from DM */
+
+DATA ADSL_STEP_1_DM;
+	RETAIN STUDYID SUBJID USUBJID ARM TRT01P TRT01A AGE AGEU RACE SEX ETHNIC RFSTDTC RFENDTC;
+	SET dm_sdtm;
+	WHERE ARM NOT IN ('Screen Failure');
+	TRT01P = ARM;
+	TRT01A = TRT01P;
+	KEEP STUDYID SUBJID SITEID USUBJID ARM DTHFL TRT01P TRT01A AGE AGEU RACE SEX ETHNIC RFSTDTC RFENDTC;
+RUN;
+
+PROC SQL;
+SELECT QUOTE(USUBJID)
+INTO :usubjid_inclusive SEPARATED BY ', '
+FROM ADSL_STEP_1_DM
+;
+QUIT;
+%PUT &usubjid_inclusive;
+
+/*Step 2 Derive vairables from EX*/
+DATA ADSL_STEP_2_EX;
+	SET ex_sdtm;
+	WHERE USUBJID IN (&usubjid_inclusive);
+RUN;
+
+/*Step 3 Derive vairables from SV*/
+DATA ADSL_STEP_3_SV;
+	SET sv_sdtm;
+	WHERE USUBJID IN (&usubjid_inclusive);
+RUN;
+
+/*Step 4 Derive vairables from DS*/
+DATA ADSL_STEP_4_DS;
+	SET ds_sdtm;
+	WHERE USUBJID IN (&usubjid_inclusive);
+RUN;
+
+/*Step 5 Derive vairables from VS*/
+DATA ADSL_STEP_5_VS;
+	SET vs_sdtm;
+	WHERE USUBJID IN (&usubjid_inclusive)
+	AND VSTESTCD IN ('HEIGHT','WEIGHT');
+RUN;
+
+PROC FREQ DATA = adsl_step_5_vs;
+	TABLES VSTESTCD / MISSING;
+RUN;
+
+/*Step 6 Derive vairables from SC*/
+DATA ADSL_STEP_6_SC;
+	SET sc_sdtm;
+	WHERE USUBJID IN (&usubjid_inclusive);
+RUN;
+
+
+/*==============================================================================================
+									Derivation Chain 2
+================================================================================================*/
+/*Step 7 Derive TRT01PN, TRT01AN, AGEGRN1, AGEGR1, SITEGR1 from DM */
+
+DATA ADSL_STEP_7_TRT_AGE;
+	SET adsl_step_1_dm;
+	
+	IF MISSING(TRT01P) OR MISSING(TRT01A) THEN DO;
+		TRT01PN = .;
+		TRT01AN = .;
+	END;
+	ELSE IF TRT01P = 'Placebo' THEN TRT01PN = 0;
+	ELSE IF TRT01P = 'Xanomeline Low Dose' THEN TRT01PN = 54;
+	ELSE IF TRT01P = 'Xanomeline High Dose' THEN TRT01PN = 81;
+	
+	IF TRT01A = 'Placebo' THEN TRT01AN = 0;
+	ELSE IF TRT01A = 'Xanomeline Low Dose' THEN TRT01AN = 54;
+	ELSE IF TRT01A = 'Xanomeline High Dose' THEN TRT01AN = 81;
+	
+	LENGTH AGEGR1 $5;
+	
+	IF MISSING(AGE) THEN DO;
+		AGEGR1N = .;
+		AGEGR1 = '';
+	END;
+	ELSE IF AGE < 65  THEN DO;
+		AGEGR1N = 1;
+		AGEGR1 = '<65';
+	END;
+	ELSE IF AGE >=65 AND AGE =< 80 THEN DO;
+		AGEGR1N = 2;
+		AGEGR1 = '65-80';
+	END;
+	ELSE IF AGE > 80 THEN DO;
+		AGEGR1N = 3;
+		AGEGR1 = '>80';
+	END;
+	
+	IF MISSING(RACE) THEN RACEN = .;
+	ELSE IF RACE = 'WHITE' THEN RACEN = 1;
+	ELSE IF RACE = 'BLACK OR AFRICAN AMERICAN' THEN RACEN = 2;
+	ELSE IF RACE = 'AMERICAN INDIAN OR ALASKA NATIVE' THEN RACEN = 6;
+	ELSE IF RACE = 'ASIAN' THEN RACEN = 7;
+
+	
+RUN;
+
+/*STEP 7 QC for the derived variables;*/
+PROC FREQ DATA = ADSL_STEP_7_TRT_AGE;
+	TABLES TRT01P*TRT01A*TRT01PN*TRT01AN / LIST MISSING;
+RUN;
+
+PROC FREQ DATA = ADSL_STEP_7_TRT_AGE;
+	TABLES AGE*AGEGR1*AGEGR1N / LIST MISSING;
+RUN;
+
+PROC FREQ DATA = ADSL_STEP_7_TRT_AGE;
+	TABLES RACE*RACEN/ LIST MISSING;
+RUN;
+
+
+/*Step 8 Derive TRTEDT from EX */
+
+PROC SQL;
+SELECT
+DISTINCT EXENDTC AS A
+FROM ADSL_STEP_2_EX
+;
+QUIT;
+
+PROC SORT DATA = ADSL_STEP_2_EX;
+	BY USUBJID VISITNUM VISIT;
+RUN;
+
+DATA TEST_TRTEDT;
+	SET ADSL_STEP_2_EX;
+	BY USUBJID VISITNUM VISIT;
+	
+	IF LAST.USUBJID = 1 AND NOT MISSING(EXENDTC) THEN DO;
+		TRTEDT = INPUT(EXENDTC, YYMMDD10.);
+		CHECK_FL = 'Y';
+	END;
+	FORMAT TRTEDT DATE9.;
+	IF CHECK_FL = 'Y';
+	KEEP STUDYID USUBJID TRTEDT CHECK_FL;
+RUN;
+
+PROC SORT DATA = TEST_TRTEDT;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = adsl_step_7_trt_age;
+	BY STUDYID USUBJID;
+RUN;
+
+
+PROC SQL;
+CREATE TABLE usubjid_MISSING_EXENDTC AS (SELECT USUBJID
+FROM ADSL_STEP_1_DM
+EXCEPT
+SELECT USUBJID
+FROM TEST_TRTEDT
+WHERE CHECK_FL = 'Y')
+;
+SELECT QUOTE(USUBJID) as usubjid_check
+INTO :check SEPARATED BY ', '
+FROM usubjid_MISSING_EXENDTC
+;
+QUIT;
+
+DATA ADSL_STEP_8_TRTEDT;
+	MERGE ADSL_STEP_7_TRT_AGE(IN = A) TEST_TRTEDT(IN = B);
+	BY STUDYID USUBJID;
+	IF A = 1;
+	
+	IF MISSING(TRTEDT) THEN TRTEDT = INPUT(RFENDTC, YYMMDD10.);
+	DROP CHECK_FL;
+RUN;
+
+
+/*Step 9 Derive TRTSDT from SV*/
+DATA TEST_TRTSDT;
+	SET ADSL_STEP_3_SV; 
+	IF VISITNUM = 3 THEN TRTSDT = INPUT(SVSTDTC, YYMMDD10.);
+	FORMAT TRTSDT DATE9.;
+	
+	IF NOT MISSING(TRTSDT);
+	KEEP STUDYID USUBJID TRTSDT;
+RUN;
+
+PROC SORT DATA = TEST_TRTSDT;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = ADSL_STEP_8_TRTEDT;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_STEP_9_TRTSDT;
+	MERGE ADSL_STEP_8_TRTEDT(IN = A) TEST_TRTSDT(IN = B);
+	BY USUBJID;
+	IF A = 1;
+RUN;
+
+
+/*Step 10 Derive VISIT1DT from SV*/
+DATA TEST_VISIT1DT;
+	SET adsl_step_3_sv;
+	WHERE VISITNUM = 1;
+	VISIT1DT = INPUT(SVSTDTC, YYMMDD10.);
+	FORMAT VISIT1DT DATE9.;
+	KEEP STUDYID USUBJID VISIT1DT;
+RUN;
+
+PROC SORT DATA = TEST_VISIT1DT;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = ADSL_STEP_9_TRTSDT;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_STEP_10_VISIT1DT;
+	MERGE ADSL_STEP_9_TRTSDT(IN = A) TEST_VISIT1DT(IN = B);
+	BY USUBJID;
+	IF A = 1;
+RUN;
+
+/*Step 11 Derive COMPFL from SV*/
+DATA TEST_COMPFL;
+	SET adsl_step_3_sv;
+	WHERE VISITNUM IN (8,10,12);
+	KEEP STUDYID USUBJID VISIT SVENDTC;
+RUN;
+
+PROC TRANSPOSE DATA = TEST_COMPFL OUT = TEST_COMPFL_TRANS (DROP = _NAME_ _LABEL_ );
+	VAR SVENDTC;
+	ID VISIT;
+	BY STUDYID USUBJID;
+RUN;
+
+
+PROC SORT DATA = TEST_COMPFL_TRANS;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = adsl_step_10_visit1dt;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_COMPFL;
+	MERGE ADSL_STEP_10_VISIT1DT(IN = A) TEST_COMPFL_TRANS(IN = B);
+	BY USUBJID;
+	IF A = 1;
+	WEEK8 = 'WEEK 8'N;
+	WEEK16 = 'WEEK 16'N;
+	WEEK24 = 'WEEK 24'N;
+	DROP 'WEEK 8'N 'WEEK 16'N 'WEEK 24'N;
+
+RUN;
+
+PROC PRINT DATA = ADSL_COMPFL;
+RUN;
+
+DATA ADSL_STEP_11_COMPFL;
+	SET ADSL_COMPFL;
+	
+	IF INPUT(RFENDTC, YYMMDD10.) >= INPUT(WEEK8, YYMMDD10.) AND NOT MISSING(WEEK8) THEN COMP8FL = 'Y';
+	ELSE IF MISSING(WEEK8) THEN COMP8FL = 'N';
+	
+	IF INPUT(RFENDTC, YYMMDD10.) >= INPUT(WEEK16, YYMMDD10.) AND NOT MISSING(WEEK16) THEN COMP16FL = 'Y';
+	ELSE IF MISSING(WEEK16) THEN COMP16FL = 'N';
+	
+	IF INPUT(RFENDTC, YYMMDD10.) >= INPUT(WEEK24, YYMMDD10.) AND NOT MISSING(WEEK24) THEN COMP24FL = 'Y';
+	ELSE IF MISSING(WEEK24) THEN COMP24FL = 'N';
+	
+	DROP WEEK8 WEEK16 WEEK24;
+RUN;
+
+/*Step 12 Derive BMI from VS*/
+
+DATA HEIGHTBL_TEST;
+	SET ADSL_STEP_5_VS;
+	IF VSTESTCD = 'HEIGHT' AND VISITNUM = 1 THEN HEIGHTBL = ROUND(VSSTRESN ,0.1);
+	
+	IF NOT MISSING(HEIGHTBL);
+	KEEP STUDYID USUBJID HEIGHTBL;
+RUN;
+
+DATA WEIGHTBL_TEST;
+	SET ADSL_STEP_5_VS;
+	IF VSTESTCD = 'WEIGHT' AND VISITNUM = 3 THEN WEIGHTBL = ROUND(VSSTRESN, 0.1);
+		IF NOT MISSING(WEIGHTBL);
+	KEEP STUDYID USUBJID WEIGHTBL;
+RUN;
+
+PROC SORT DATA = WEIGHTBL_TEST;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = HEIGHTBL_TEST;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA BMIBL_TEST;
+	MERGE HEIGHTBL_TEST(IN = A) WEIGHTBL_TEST(IN = B);
+	BY USUBJID;
+	IF A = 1;
+	
+	BMIBL = ROUND(WEIGHTBL/((HEIGHTBL*0.01)**2),0.1);
+	LENGTH BMIBLGR1 $6;
+	IF 0 < BMIBL < 25 OR MISSING(BMIBL) THEN BMIBLGR1 = '<25';
+	ELSE IF 25 <= BMIBL AND BMIBL < 30 THEN BMIBLGR1 = '25-<30';
+	ELSE IF 30 <= BMIBL THEN BMIBLGR1 = '>=30';
+RUN;
+
+PROC SORT DATA = BMIBL_TEST;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = ADSL_STEP_11_COMPFL;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_STEP_12_BMIBL;
+	MERGE ADSL_STEP_11_COMPFL (IN = A) BMIBL_TEST(IN = B);
+	BY USUBJID;
+RUN;
+
+PROC FREQ DATA = ADSL_STEP_12_BMIBL;
+	TABLES HEIGHTBL*WEIGHTBL*BMIBL /LIST MISSING;
+RUN;
+
+/*Step 13 Derive DCDECOD, DCREASCD from DS*/
+
+
+DATA TEST_DCREASCD;
+	SET ADSL_STEP_4_DS;
+	WHERE DSCAT = 'DISPOSITION EVENT';
+	LENGTH DCREASCD $18;
+	DCDECOD = DSDECOD;	
+	IF DSDECOD = 'PROTOCOL VIOLATION' AND DSTERM = 'PROTOCOL ENTRY CRITERIA NOT MET' THEN
+        DCREASCD = 'I/E Not Met';
+    ELSE IF DSDECOD = 'COMPLETED' THEN DCREASCD = 'Completed';
+    ELSE IF DSDECOD = 'ADVERSE EVENT' THEN DCREASCD = 'Adverse Event';
+    ELSE IF DSDECOD = 'DEATH' THEN DCREASCD = 'Death';
+    ELSE IF DSDECOD = 'LACK OF EFFICACY' THEN DCREASCD = 'Lack of Efficacy';
+    ELSE IF DSDECOD = 'LOST TO FOLLOW-UP' THEN DCREASCD = 'Lost to Follow-up';
+    ELSE IF DSDECOD = 'WITHDRAWAL BY SUBJECT' THEN DCREASCD = 'Withdrew Consent';
+    ELSE IF DSDECOD = 'PROTOCOL VIOLATION' THEN DCREASCD = 'Protocol Violation';
+    ELSE IF DSDECOD = 'PHYSICIAN DECISION' THEN DCREASCD = 'Physician Decision';
+    ELSE IF DSDECOD = 'STUDY TERMINATED BY SPONSOR' THEN DCREASCD = 'Sponsor Decision';
+
+	
+RUN;
+
+PROC SORT DATA = TEST_DCREASCD;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = ADSL_STEP_12_BMIBL;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_STEP_13_DCREASCD;
+	MERGE ADSL_STEP_12_BMIBL(IN = A) TEST_DCREASCD(IN = B);
+	BY USUBJID;
+	IF A = 1;
+RUN;
+
+/*Step 14 Derive VISITNUMEN from DS*/
+
+DATA TEST_VISNUMEN;
+	SET ADSL_STEP_4_DS;
+	WHERE DSCAT='DISPOSITION EVENT';
+	IF VISITNUM = 13 THEN VISNUMEN = 12;
+	ELSE IF VISITNUM ^= 13 THEN VISNUMEN = VISITNUM;
+	KEEP STUDYID USUBJID VISNUMEN;
+RUN;
+
+PROC SORT DATA = TEST_VISNUMEN;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = adsl_step_13_DCREASCD;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_STEP_14_VISNUMEN;
+	MERGE adsl_step_13_DCREASCD(IN = A) TEST_VISNUMEN(IN = B);
+	BY USUBJID;
+	IF A = 1;
+RUN;
+
+
+
+/*Step 15 Derive EDUCLVL from SC*/
+DATA TEST_EDUCLVL;
+	SET adsl_step_6_sc;
+	EDUCLVL = SCSTRESN;
+	KEEP STUDYID USUBJID EDUCLVL;
+RUN;
+
+PROC SORT DATA = TEST_EDUCLVL;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = adsl_step_14_visnumen;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_STEP_15_EDUCLVL;
+	MERGE ADSL_STEP_14_VISNUMEN(IN = A) TEST_EDUCLVL(IN = B);
+	BY USUBJID; 
+	IF A = 1;
+RUN;
+
+/*Step 16 Derive DISONSDT from MH*/
+
+DATA DISONSDT_TEST;
+	SET mh_sdtm;
+	WHERE MHCAT = 'PRIMARY DIAGNOSIS';
+	
+	DISONSDT = INPUT(MHSTDTC, YYMMDD10.);
+	FORMAT DISONSDT DATE9.;
+	KEEP STUDYID USUBJID DISONSDT;
+RUN;
+
+PROC SORT DATA = DISONSDT_TEST; 
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = ADSL_STEP_15_EDUCLVL;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_STEP_16_DISONSDT;
+	MERGE ADSL_STEP_15_EDUCLVL(IN = A) DISONSDT_TEST(IN = B);
+	BY USUBJID;
+	IF A = 1;
+RUN;
+
+/*==============================================================================================
+									Derivation Chain 3
+================================================================================================*/
+
+/*Step 17 Derive TRTDUR*/
+DATA ADSL_STEP_17_TRTDUR;
+	SET ADSL_STEP_16_DISONSDT;
+	TRTDUR = TRTEDT-TRTSDT + 1;
+RUN;
+
+/*Step 18 Derive ITTFL, SAFFL, DISCONFL, DSRAEFL */
+DATA ADSL_STEP_18_FL;
+	SET ADSL_STEP_17_TRTDUR;
+	
+	IF NOT MISSING(ARM) THEN ITTFL = 'Y';
+	ELSE IF ITTFL = 'N';
+	
+	IF ITTFL = 'Y' AND NOT MISSING(TRTSDT) THEN SAFFL = 'Y';
+	ELSE IF SAFFL = 'N';
+	
+	IF DCREASCD ^= 'Completed' THEN DISCONFL = 'Y';
+	ELSE DISCONFL = '';
+	
+	IF DCREASCD = 'Adverse Event' THEN DSRAEFL = 'Y';
+	ELSE DSRAEFL = '';
+RUN;
+
+/*Step 19 Derive DURDIS, DURDSGR1*/
+
+DATA ADSL_STEP_19_DURDIS;
+	SET ADSL_STEP_18_FL;
+	DURDIS = ROUND((VISIT1DT - DISONSDT) / 30.4375,0.1) ;
+	LENGTH DURDSGR1 $4;
+	
+	IF MISSING(DURDIS) THEN DURDSGR1 = '';
+	IF DURDIS < 12 THEN DURDSGR1 = '<12';
+	ELSE IF DURDIS >= 12 THEN DURDSGR1 = '>=12';
+RUN;
+
+/*==============================================================================================
+									Derivation Chain 4
+================================================================================================*/
+
+/*Step 20 Derive MMSETOT*/
+
+DATA ADSL_STEP_8_QS;
+	SET QS_SDTM;
+	WHERE QSCAT = 'MINI-MENTAL STATE';
+	KEEP STUDYID USUBJID QSCAT QSSTRESN;
+RUN;
+
+PROC SORT DATA = ADSL_STEP_8_QS;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC MEANS DATA = ADSL_STEP_8_QS NWAY NOPRINT;
+	CLASS STUDYID USUBJID;
+	VAR QSSTRESN;
+	OUTPUT OUT = TEST_MMSETOT (DROP = _TYPE_ _FREQ_) SUM = MMSETOT;
+RUN;
+
+PROC SORT DATA = TEST_MMSETOT;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = ADSL_STEP_19_DURDIS;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA ADSL_STEP_20_MMSETOT;
+	MERGE ADSL_STEP_19_DURDIS (IN = A) TEST_MMSETOT(IN = B);
+	BY USUBJID;
+	IF A = 1;
+RUN;
+
+/*Step 21 Derive RFENDT*/
+DATA ADSL_STEP_21_RFENDT;
+	SET adsl_step_20_mmsetot;
+	RFENDT = INPUT(RFENDTC, YYMMDD10.);
+	FORMAT RFENDT DATE9.;
+RUN;
+
+
+/*Step 22 Derive EFFFL*/
+
+DATA EFFFL_FROM_SAFFL;
+	SET ADSL_STEP_21_RFENDT;
+	WHERE SAFFL = 'Y';
+	KEEP STUDYID USUBJID SAFFL;
+RUN;
+
+DATA EFFFL_FROM_ADAS;
+	SET QS_SDTM;
+	WHERE QSCAT IN ("ALZHEIMER'S DISEASE ASSESSMENT SCALE") AND VISITNUM > 3;
+	KEEP STUDYID USUBJID;
+RUN;
+
+DATA EFFFL_FROM_CIBIC;
+	SET QS_SDTM;
+	WHERE QSCAT IN ("CLINICIAN'S INTERVIEW-BASED IMPRESSION OF CHANGE (CIBIC+)") AND VISITNUM > 3;
+	KEEP STUDYID USUBJID;
+RUN;
+
+PROC SQL;
+CREATE TABLE EFFFL_USUBJID_A AS(SELECT USUBJID
+FROM EFFFL_FROM_SAFFL
+WHERE SAFFL = 'Y'
+EXCEPT
+SELECT DISTINCT USUBJID AS USUBJID_QS
+FROM EFFFL_FROM_ADAS)
+;
+CREATE TABLE EFFFL_USUBJID_C AS(SELECT USUBJID
+FROM EFFFL_FROM_SAFFL
+WHERE SAFFL = 'Y'
+EXCEPT
+SELECT DISTINCT USUBJID AS USUBJID_QS
+FROM EFFFL_FROM_CIBIC)
+;
+
+
+CREATE TABLE EFFFL_ID AS (SELECT * FROM EFFFL_USUBJID_A
+UNION 
+SELECT * FROM EFFFL_USUBJID_C
+);
+SELECT QUOTE(USUBJID)
+INTO :EFFFLID SEPARATED BY ', '
+FROM EFFFL_ID
+;
+QUIT;
+
+%PUT &EFFFLID;
+
+DATA ADSL_STEP_22_EFFFL;
+	SET ADSL_STEP_21_RFENDT;
+	EFFFL = 'Y';                              
+    IF USUBJID IN (&EFFFLID) THEN EFFFL = 'N';
+	ELSE EFFFL = 'Y';
+RUN;
+
+PROC PRINT DATA = ADSL_STEP_22_EFFFL;
+RUN;
+
+/*Step 23 Derive TRTDUR*/
+
+DATA ADSL_STEP_23_TRTDUR;
+	SET ADSL_STEP_22_EFFFL; 
+	TRTDUR = TRTEDT-TRTSDT+1;
+RUN;
+
+/*Step 24 Derive SITEGR1*/
+PROC FREQ DATA = ADSL_STEP_23_TRTDUR;
+	TABLES SITEID * TRT01P/MISSING;
+RUN;
+
+DATA ADSL_STEP_24_SITEGR1;
+	SET ADSL_STEP_23_TRTDUR;
+	LENGTH SITEGR1 $3;
+	IF SITEID IN ('702','706','707','711','714','715','717') THEN SITEGR1 = '900';
+	ELSE SITEGR1 = SITEID;
+RUN;
+
+/*========================================================================================
+						COMPARE between ADSL_myself to STD
+==========================================================================================*/
+libname adsladam xport "/home/u63793342/sasuser.v94/adsl.xpt";
+
+DATA ADSL_COMPARE;
+	SET adsladam.adsl;
+	DROP CUMDOSE AVGDD;
+RUN;
+
+PROC SQL;
+SELECT name
+FROM Dictionary.columns
+WHERE libname = 'WORK'
+AND memname = 'ADSL_COMPARE'
+EXCEPT
+SELECT name
+FROM Dictionary.columns
+WHERE libname = 'WORK'
+AND memname = 'ADSL_STEP_23_TRTDUR'
+;
+SELECT name
+INTO :name_order SEPARATED BY ' '
+FROM Dictionary.columns
+WHERE libname = 'WORK'
+AND memname = 'ADSL_COMPARE'
+;
+QUIT;
+
+%PUT &name_order;
+
+DATA ADSL_FINAL_COMPARE;
+	RETAIN &name_order;
+	SET ADSL_STEP_24_SITEGR1;
+	KEEP &name_order;
+RUN;
+
+PROC SORT DATA = ADSL_COMPARE;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = ADSL_FINAL_COMPARE;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC COMPARE BASE = ADSL_COMPARE COMPARE = ADSL_FINAL_COMPARE;
+	ID STUDYID USUBJID;
+RUN;
+
+PROC FREQ DATA = ADSL_FINAL_COMPARE;
+	TABLES ARM*SITEID / MISSING;
+RUN;
+
+
+/*=========================================================================================
+	ADSL_V1 has some problem and needs to check CUMDOSE, AVGDD.
+===========================================================================================*/
+LIBNAME ADAM "/home/u63793342/sasuser.v94";
+
+DATA ADAM.ADSL_V1;
+    ATTRIB
+        STUDYID   LENGTH=$12  LABEL='Study Identifier'
+        USUBJID   LENGTH=$11  LABEL='Unique Subject Identifier'
+        SUBJID    LENGTH=$4   LABEL='Subject Identifier for the Study'
+        SITEID    LENGTH=$3   LABEL='Study Site Identifier'
+        SITEGR1   LENGTH=$3   LABEL='Pooled Site Group 1'
+        ARM       LENGTH=$20  LABEL='Description of Planned Arm'
+        TRT01P    LENGTH=$20  LABEL='Planned Treatment for Period 01'
+        TRT01PN   LENGTH=8    LABEL='Planned Treatment for Period 01 (N)'
+        TRT01A    LENGTH=$20  LABEL='Actual Treatment for Period 01'
+        TRT01AN   LENGTH=8    LABEL='Actual Treatment for Period 01 (N)'
+        TRTSDT    LENGTH=8    LABEL='Date of First Exposure to Treatment'  FORMAT=DATE9.
+        TRTEDT    LENGTH=8    LABEL='Date of Last Exposure to Treatment'   FORMAT=DATE9.
+        TRTDUR    LENGTH=8    LABEL='Duration of Treatment (days)'
+        AVGDD     LENGTH=8    LABEL='Avg Daily Dose (as planned)'
+        CUMDOSE   LENGTH=8    LABEL='Cumulative Dose (as planned)'
+        AGE       LENGTH=8    LABEL='Age'
+        AGEGR1    LENGTH=$5   LABEL='Pooled Age Group 1'
+        AGEGR1N   LENGTH=8    LABEL='Pooled Age Group 1 (N)'
+        AGEU      LENGTH=$5   LABEL='Age Units'
+        RACE      LENGTH=$32  LABEL='Race'
+        RACEN     LENGTH=8    LABEL='Race (N)'
+        SEX       LENGTH=$1   LABEL='Sex'
+        ETHNIC    LENGTH=$22  LABEL='Ethnicity'
+        SAFFL     LENGTH=$1   LABEL='Safety Population Flag'
+        ITTFL     LENGTH=$1   LABEL='Intent-To-Treat Population Flag'
+        EFFFL     LENGTH=$1   LABEL='Efficacy Population Flag'
+        COMP8FL   LENGTH=$1   LABEL='Completers of Week 8 Population Flag'
+        COMP16FL  LENGTH=$1   LABEL='Completers of Week 16 Population Flag'
+        COMP24FL  LENGTH=$1   LABEL='Completers of Week 24 Population Flag'
+        DISCONFL  LENGTH=$1   LABEL='Did the Subject Discontinue the Study?'
+        DSRAEFL   LENGTH=$1   LABEL='Discontinued due to AE?'
+        DTHFL     LENGTH=$1   LABEL='Subject Died?'
+        BMIBL     LENGTH=8    LABEL='Baseline BMI (kg/m^2)'
+        BMIBLGR1  LENGTH=$6   LABEL='Pooled Baseline BMI Group 1'
+        HEIGHTBL  LENGTH=8    LABEL='Baseline Height (cm)'
+        WEIGHTBL  LENGTH=8    LABEL='Baseline Weight (kg)'
+        EDUCLVL   LENGTH=8    LABEL='Years of Education'
+        DISONSDT  LENGTH=8    LABEL='Date of Onset of Disease'             FORMAT=DATE9.
+        DURDIS    LENGTH=8    LABEL='Duration of Disease (Months)'
+        DURDSGR1  LENGTH=$4   LABEL='Pooled Disease Duration Group 1'
+        VISIT1DT  LENGTH=8    LABEL='Date of Visit 1'                      FORMAT=DATE9.
+        RFSTDTC   LENGTH=$20  LABEL='Subject Reference Start Date/Time'
+        RFENDTC   LENGTH=$20  LABEL='Subject Reference End Date/Time'
+        VISNUMEN  LENGTH=8    LABEL='End of Trt Visit (Vis 12 or Early Term.)'
+        RFENDT    LENGTH=8    LABEL='Date of Discontinuation/Completion'   FORMAT=DATE9.
+        DCDECOD   LENGTH=$27  LABEL='Standardized Disposition Term'
+        DCREASCD  LENGTH=$18  LABEL='Reason for Discontinuation'
+        MMSETOT   LENGTH=8    LABEL='MMSE Total'
+    ;
+    SET ADSL_STEP_24_SITEGR1;
+    KEEP &name_order;
+RUN;
+
+/*========================================================================================
+			CUMDOSE, AVGDD need to check (Code below may have some mistakes)
+==========================================================================================*/
+
+/*Step 24 Derive CUMDOSE*/
+
+PROC SQL;
+SELECT QUOTE(USUBJID)
+INTO :USUBJID_HIGH SEPARATED BY ', '
+FROM ADSL_STEP_23_TRTDUR
+WHERE TRT01AN = 2
+;
+QUIT;
+
+%PUT &USUBJID_HIGH;
+
+
+DATA HIGH_GROUP_SV;
+	SET ADSL_STEP_3_SV;
+	WHERE USUBJID IN (&USUBJID_HIGH) AND VISITNUM IN (4, 12);
+	STDTC = INPUT(SVSTDTC, YYMMDD10.);
+	FORMAT STDTC DATE9.;
+	KEEP STUDYID USUBJID VISITNUM STDTC;
+RUN;
+
+PROC TRANSPOSE DATA = HIGH_GROUP_SV OUT = HIGH_GROUP_SV_TRANS 
+	(DROP = _NAME_ RENAME = ('4'N = VISIT4DATE '12'N = VISIT12DATE));
+	ID VISITNUM;
+	BY STUDYID USUBJID;
+	VAR STDTC;
+RUN;
+
+DATA HIGH_GROUP_ADSL;
+	SET ADSL_STEP_23_TRTDUR;
+	WHERE USUBJID IN (&USUBJID_HIGH);
+	KEEP STUDYID USUBJID TRTEDT TRTSDT; 
+RUN;
+
+PROC SORT DATA = HIGH_GROUP_ADSL;
+	BY STUDYID USUBJID;
+RUN;
+
+PROC SORT DATA = HIGH_GROUP_SV_TRANS;
+	BY STUDYID USUBJID;
+RUN;
+
+DATA HIGH_GROUP_VISITDATE;
+	MERGE HIGH_GROUP_ADSL(IN = A) HIGH_GROUP_SV_TRANS(IN = B);
+	BY USUBJID;
+	IF A = 1 AND B = 1;
+RUN;
+
+PROC PRINT DATA = HIGH_GROUP_VISITDATE;
+RUN;
+
+DATA HIGH_GROUP_INTERVAL;
+	SET HIGH_GROUP_VISITDATE;
+	
+	IF NOT MISSING(VISIT4DATE) THEN INTERVAL_1 = VISIT4DATE - TRTSDT + 1;
+	ELSE IF MISSING(VISIT4DATE) THEN INTERVAL_1 = TRTEDT - TRTSDT + 1;
+	
+	
+	IF MISSING(VISIT4DATE) THEN DO;             
+        INTERVAL_2 = 0;
+        INTERVAL_3 = 0;
+    END;
+    
+    ELSE IF MISSING(VISIT12DATE) THEN DO;   
+        INTERVAL_2 = TRTEDT - VISIT4DATE;
+        INTERVAL_3 = 0;
+    END;
+    
+    ELSE DO;                               
+        INTERVAL_2 = VISIT12DATE - VISIT4DATE;
+        INTERVAL_3 = TRTEDT - VISIT12DATE;
+    END;
+	
+RUN;
+
+PROC SQL;
+SELECT*
+FROM HIGH_GROUP_INTERVAL
+WHERE INTERVAL_1 < 0 OR INTERVAL_2 < 0 OR INTERVAL_3 < 0
+;
+QUIT;
+
+PROC SQL;
+SELECT QUOTE(USUBJID)
+INTO :USUBJID_PROBLEM SEPARATED BY ', '
+FROM HIGH_GROUP_INTERVAL
+WHERE INTERVAL_1 < 0 OR INTERVAL_2 < 0 OR INTERVAL_3 < 0
+;
+QUIT;
+
+%PUT &USUBJID_PROBLEM;
+
+DATA HIGH_GROUP_RECHECK_SV;
+	SET  ADSL_STEP_3_SV;
+	WHERE USUBJID IN (&USUBJID_PROBLEM);
+RUN;
+
+PROC PRINT DATA = HIGH_GROUP_RECHECK_SV;
+RUN;
+
+PROC PRINT DATA = ADSL_STEP_2_EX;
+	WHERE USUBJID IN (&USUBJID_PROBLEM);
+RUN;
